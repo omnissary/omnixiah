@@ -19,8 +19,16 @@ build profile="minimal" nix_build_args="":
 run profile="minimal":
   nix run {{nix_flags}} .#{{profile}}
 
-check:
+lint:
   nix flake check {{nix_flags}} --show-trace
+
+test test="all":
+  if [[ "{{test}}" == "all" ]]; then \
+    attrs=$(nix eval {{nix_flags}} --json .#lib.tests | jq -r --arg system "{{system}}" 'keys | map(".#checks.\($system).module-" + .) | join(" ")'); \
+    nix build {{nix_flags}} --show-trace ${attrs}; \
+  else \
+    nix build {{nix_flags}} --show-trace .#checks.{{system}}.module-{{test}}; \
+  fi
 
 fmt:
   nix fmt {{nix_flags}}

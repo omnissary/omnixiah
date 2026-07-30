@@ -38,10 +38,11 @@
     }:
     let
       inherit (nixpkgs) lib;
-      inherit (lib) unique;
+      inherit (lib) mapAttrs' nameValuePair unique;
       inherit (flake-parts.lib) mkFlake;
 
       profileDefinitions = import ./profiles;
+      testMetadata = import ./tests/metadata.nix;
       microvmLib = import ./lib/microvm.nix {
         inherit inputs self;
       };
@@ -87,6 +88,23 @@
               pkgs.writeText "omnixiah-${name}-eval" config.system.build.toplevel.drvPath;
           }) (profileNamesFor system)
         );
+
+      moduleChecks =
+        {
+          pkgs,
+          system,
+        }:
+        let
+          moduleTests = import ./tests {
+            inherit
+              inputs
+              pkgs
+              self
+              system
+              ;
+          };
+        in
+        mapAttrs' (name: test: nameValuePair "module-${name}" test) moduleTests;
     in
     mkFlake { inherit inputs; } {
       inherit systems;
@@ -98,6 +116,12 @@
       flake = {
         lib = microvmLib // {
           profiles = profileMetadata;
+          tests = testMetadata;
+        };
+
+        nixosModules = {
+          base = ./modules/base.nix;
+          firewall = ./modules/firewall.nix;
         };
 
         nixosConfigurations = builtins.mapAttrs (
@@ -132,7 +156,7 @@
             default = apps.minimal;
           };
 
-          checks = profileChecks system;
+          checks = profileChecks system // moduleChecks { inherit pkgs system; };
 
           devShells.default = pkgs.mkShellNoCC {
             packages = [

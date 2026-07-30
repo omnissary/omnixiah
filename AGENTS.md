@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, and `lib.profiles` metadata. `lib/microvm.nix` exports MicroVM helpers, including `mkMicrovmProfile`. `modules/` holds shared NixOS modules. `profiles/default.nix` is the profile registry; `profiles/vm.nix` contains VM-only login defaults; runnable profiles live in files such as `profiles/minimal.nix`.
+Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, `nixosModules`, and `lib.profiles` metadata. `lib/microvm.nix` exports MicroVM helpers, including `mkMicrovmProfile`. `modules/` holds shared NixOS modules such as `modules/firewall.nix`. `profiles/default.nix` is the profile registry; `profiles/vm.nix` contains VM-only login defaults; runnable profiles live in files such as `profiles/minimal.nix`.
 
 Use neighboring repositories as local context: `../infra/flake.nix` is the source for the canonical corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection.
 
@@ -14,7 +14,8 @@ Use the lowercase `justfile` as the command surface.
 - `just eval minimal`: evaluate the minimal profile hostname.
 - `just build minimal`: build the MicroVM runner.
 - `just run minimal`: run the MicroVM profile.
-- `just check`: run `nix flake check --show-trace`.
+- `just lint`: run `nix flake check --show-trace`.
+- `just test`: run all module VM tests from `.#lib.tests`.
 - `just fmt`: run treefmt through `nix fmt`.
 
 Direct Nix commands are acceptable for debugging, for example `nix build .#packages.x86_64-linux.minimal`.
@@ -29,7 +30,7 @@ No shortcuts: follow the architecture, keep changes cohesive, and chase failures
 
 ## Testing Guidelines
 
-Every profile should evaluate with `just eval <profile>`. Before submitting changes, run `just fmt` and `just check`. Treefmt is wired with nixfmt, deadnix, statix, and shellcheck.
+Tests under `tests/modules/` should exercise module evaluation or VM behavior for changed modules. Every profile should evaluate with `just eval <profile>`. Before submitting changes, run `just fmt`, `just test`, and `just lint`. Treefmt is wired with nixfmt, deadnix, statix, and shellcheck.
 
 ## Commit & Pull Request Guidelines
 
