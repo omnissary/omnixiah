@@ -4,7 +4,7 @@
 
 Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, `nixosModules`, and metadata. `lib/microvm.nix` exports `mkMicrovmProfile`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/default.nix` is the registry; `profiles/vm.nix` contains VM-only login defaults.
 
-Use neighboring repositories as context: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection.
+Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
 ## Build, Test, and Development Commands
 

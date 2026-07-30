@@ -30,15 +30,15 @@
       "locked": {
         "lastModified": 1785246989,
         "narHash": "sha256-7CjGBACbXXIJvGrPed75QI8ytqc48M78GP9aB/h2VSc=",
-        "ref": "refs/heads/main",
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
         "rev": "39a499ab85311b56dddb09ec43351cc3658f22c1",
-        "revCount": 1167,
-        "type": "git",
-        "url": "file:///home/user/projects/nix/microvm"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/user/projects/nix/microvm"
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "type": "github"
       }
     },
     "nixpkgs": {

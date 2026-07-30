@@ -24,7 +24,7 @@
     };
 
     microvm = {
-      url = "git+file:///home/user/projects/nix/microvm";
+      url = "github:microvm-nix/microvm.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
