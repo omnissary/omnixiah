@@ -1,0 +1,24 @@
+name: shell
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: nix
+    steps:
+      - name: git config
+        run: git config --global url.'https://git.tatikoma.dev'.insteadOf 'ssh://gitea@git.tatikoma.dev:2222'
+      - name: checkout
+        uses: https://git.tatikoma.dev/corpix/checkout-action@v3
+        with:
+          fetch-depth: 50
+      - name: rebuild gcroot
+        run: >-
+          gcroot=$(echo ${{ github.repository }} | sed 's/\//-/g').nix-shell;
+          target=/nix/var/nix/gcroots/per-user/$(whoami)/$gcroot;
+          nix build --no-accept-flake-config --extra-experimental-features "nix-command flakes" --out-link $target .#devShells.x86_64-linux.default

@@ -20,6 +20,13 @@ in
 {
   imports = [
     ./firewall.nix
+    ./nix.nix
+    ./serial.nix
+    ./sudo.nix
+    ./systemd.nix
+    ./tc.nix
+    ./timesync.nix
+    ./update-diff.nix
   ];
 
   system.stateVersion = mkDefault "25.11";
@@ -27,9 +34,7 @@ in
 
   nixpkgs.config.allowUnfree = mkDefault true;
 
-  boot.kernelParams = [
-    "console=ttyS0"
-  ];
+  modules.boot.consoles = mkDefault [ "ttyS0,115200" ];
 
   networking = {
     useNetworkd = mkDefault true;

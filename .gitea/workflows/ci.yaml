@@ -1,0 +1,31 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: nix
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lint
+            recipe: lint
+          - name: test
+            recipe: test
+    name: ${{ matrix.name }}
+    steps:
+      - name: git config
+        run: git config --global url.'https://git.tatikoma.dev'.insteadOf 'ssh://gitea@git.tatikoma.dev:2222'
+      - name: checkout
+        uses: https://git.tatikoma.dev/corpix/checkout-action@v3
+        with:
+          fetch-depth: 10
+      - name: ${{ matrix.name }}
+        run: >-
+          nix develop --no-accept-flake-config --extra-experimental-features "nix-command flakes" -c just ${{ matrix.recipe }}

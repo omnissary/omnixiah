@@ -37,6 +37,12 @@
       ...
     }:
     let
+      inherit (builtins)
+        attrNames
+        filter
+        listToAttrs
+        mapAttrs
+        ;
       inherit (nixpkgs) lib;
       inherit (lib) mapAttrs' nameValuePair unique;
       inherit (flake-parts.lib) mkFlake;
@@ -48,19 +54,18 @@
       };
       inherit (microvmLib) mkMicrovmProfile;
 
-      profileNames = builtins.attrNames profileDefinitions;
+      profileNames = attrNames profileDefinitions;
       systems = unique (map (name: profileDefinitions.${name}.system) profileNames);
 
-      profileNamesFor =
-        system: builtins.filter (name: profileDefinitions.${name}.system == system) profileNames;
+      profileNamesFor = system: filter (name: profileDefinitions.${name}.system == system) profileNames;
 
-      profileMetadata = builtins.mapAttrs (_: profile: {
+      profileMetadata = mapAttrs (_: profile: {
         inherit (profile) description system;
       }) profileDefinitions;
 
       profilePackages =
         system:
-        builtins.listToAttrs (
+        listToAttrs (
           map (name: {
             inherit name;
             value = self.nixosConfigurations.${name}.config.microvm.declaredRunner;
@@ -69,7 +74,7 @@
 
       profileApps =
         system:
-        builtins.mapAttrs (name: runner: {
+        mapAttrs (name: runner: {
           type = "app";
           program = "${runner}/bin/microvm-run";
           meta.description = profileDefinitions.${name}.description;
@@ -77,7 +82,7 @@
 
       profileChecks =
         system:
-        builtins.listToAttrs (
+        listToAttrs (
           map (name: {
             name = "${name}-eval";
             value =
@@ -122,9 +127,17 @@
         nixosModules = {
           base = ./modules/base.nix;
           firewall = ./modules/firewall.nix;
+          nix = ./modules/nix.nix;
+          qemu = ./modules/qemu.nix;
+          serial = ./modules/serial.nix;
+          sudo = ./modules/sudo.nix;
+          systemd = ./modules/systemd.nix;
+          tc = ./modules/tc.nix;
+          timesync = ./modules/timesync.nix;
+          update-diff = ./modules/update-diff.nix;
         };
 
-        nixosConfigurations = builtins.mapAttrs (
+        nixosConfigurations = mapAttrs (
           name: profile: mkMicrovmProfile (profile // { inherit name; })
         ) profileDefinitions;
       };
