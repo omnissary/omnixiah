@@ -45,13 +45,12 @@
       "locked": {
         "lastModified": 1782254168,
         "narHash": "sha256-7JyGIaSApAODThpQWQMYmnqvRBCbOn3lslJcx957d88=",
-        "rev": "f3cdd8c50113bfef1642553f5170abf2c8bb497a",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/corpix/nixpkgs/archive/f3cdd8c50113bfef1642553f5170abf2c8bb497a.tar.gz"
+        "url": "https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz"
+        "url": "https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz"
       }
     },
     "root": {

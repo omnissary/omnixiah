@@ -13,7 +13,7 @@
   };
 
   inputs = {
-    nixpkgs.url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz";
+    nixpkgs.url = "tarball+https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz";
 
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
