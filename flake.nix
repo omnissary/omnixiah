@@ -1,0 +1,164 @@
+{
+  description = "Omnixiah NixOS";
+
+  nixConfig = {
+    extra-substituters = [
+      "https://nix.tatikoma.dev"
+      "https://microvm.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "nix.tatikoma.dev-1:+WItuSmHoqFJ82o9sQFNNl6D6amg6R1mLBToVuhpXIo="
+      "microvm.cachix.org-1:oXnBc6hRE3eX5rSYdRyMYXnfzcCxC7yKPTbZXALsqys="
+    ];
+  };
+
+  inputs = {
+    nixpkgs.url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz";
+
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
+
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    microvm = {
+      url = "git+file:///home/user/projects/nix/microvm";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    inputs@{
+      self,
+      flake-parts,
+      nixpkgs,
+      ...
+    }:
+    let
+      inherit (nixpkgs) lib;
+      inherit (lib) unique;
+      inherit (flake-parts.lib) mkFlake;
+
+      profileDefinitions = import ./profiles;
+      microvmLib = import ./lib/microvm.nix {
+        inherit inputs self;
+      };
+      inherit (microvmLib) mkMicrovmProfile;
+
+      profileNames = builtins.attrNames profileDefinitions;
+      systems = unique (map (name: profileDefinitions.${name}.system) profileNames);
+
+      profileNamesFor =
+        system: builtins.filter (name: profileDefinitions.${name}.system == system) profileNames;
+
+      profileMetadata = builtins.mapAttrs (_: profile: {
+        inherit (profile) description system;
+      }) profileDefinitions;
+
+      profilePackages =
+        system:
+        builtins.listToAttrs (
+          map (name: {
+            inherit name;
+            value = self.nixosConfigurations.${name}.config.microvm.declaredRunner;
+          }) (profileNamesFor system)
+        );
+
+      profileApps =
+        system:
+        builtins.mapAttrs (name: runner: {
+          type = "app";
+          program = "${runner}/bin/microvm-run";
+          meta.description = profileDefinitions.${name}.description;
+        }) (profilePackages system);
+
+      profileChecks =
+        system:
+        builtins.listToAttrs (
+          map (name: {
+            name = "${name}-eval";
+            value =
+              let
+                pkgs = nixpkgs.legacyPackages.${system};
+                config = self.nixosConfigurations.${name}.config;
+              in
+              pkgs.writeText "omnixiah-${name}-eval" config.system.build.toplevel.drvPath;
+          }) (profileNamesFor system)
+        );
+    in
+    mkFlake { inherit inputs; } {
+      inherit systems;
+
+      imports = [
+        inputs.treefmt-nix.flakeModule
+      ];
+
+      flake = {
+        lib = microvmLib // {
+          profiles = profileMetadata;
+        };
+
+        nixosConfigurations = builtins.mapAttrs (
+          name: profile: mkMicrovmProfile (profile // { inherit name; })
+        ) profileDefinitions;
+      };
+
+      perSystem =
+        {
+          config,
+          system,
+          ...
+        }:
+        let
+          inherit (pkgs) jq just;
+
+          pkgs = import inputs.nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+          };
+          packages = profilePackages system;
+          apps = profileApps system;
+        in
+        {
+          _module.args.pkgs = pkgs;
+
+          packages = packages // {
+            default = packages.minimal;
+          };
+
+          apps = apps // {
+            default = apps.minimal;
+          };
+
+          checks = profileChecks system;
+
+          devShells.default = pkgs.mkShellNoCC {
+            packages = [
+              just
+              jq
+            ]
+            ++ [
+              config.treefmt.build.wrapper
+            ];
+          };
+
+          treefmt = {
+            projectRootFile = ".git/config";
+
+            programs.shellcheck.enable = true;
+
+            programs.deadnix.enable = true;
+            programs.deadnix.priority = 1;
+            programs.deadnix.no-lambda-arg = true;
+
+            programs.statix.enable = true;
+            programs.statix.priority = 2;
+
+            programs.nixfmt.enable = true;
+            programs.nixfmt.priority = 3;
+          };
+        };
+    };
+}
