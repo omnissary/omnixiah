@@ -1,0 +1,13 @@
+#! /usr/bin/env bash
+set -e
+
+clipboard=$(xclip -selection c -o "$@")
+
+if [ -z "$clipboard" ]
+then
+    exit 1
+fi
+
+echo -n "$clipboard" \
+    | qrencode -o -  \
+    | feh --auto-zoom --borderless --image-bg=black -

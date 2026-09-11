@@ -27,6 +27,7 @@ in
         ../modules/base.nix
         {
           networking.hostName = mkDefault "omnixiah-${name}";
+          nixpkgs.overlays = [ self.overlays.default ];
         }
       ]
       ++ modules;

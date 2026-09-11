@@ -1,0 +1,13 @@
+diff --git a/Telegram/SourceFiles/data/data_channel.cpp b/Telegram/SourceFiles/data/data_channel.cpp
+index 08ae386..f278b07 100644
+--- a/Telegram/SourceFiles/data/data_channel.cpp
++++ b/Telegram/SourceFiles/data/data_channel.cpp
+@@ -1109,7 +1109,7 @@ void ChannelData::clearInvitePeek() {
+ }
+ 
+ TimeId ChannelData::invitePeekExpires() const {
+-	return _invitePeek ? _invitePeek->expires : 0;
++	return 0;
+ }
+ 
+ QString ChannelData::invitePeekHash() const {

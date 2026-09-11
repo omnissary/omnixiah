@@ -1,0 +1,22 @@
+diff --git a/cmd/proxy/actions/home.go b/cmd/proxy/actions/home.go
+index 0b90a713..bb6c4d52 100644
+--- a/cmd/proxy/actions/home.go
++++ b/cmd/proxy/actions/home.go
+@@ -40,7 +40,7 @@ const homepage = `<!DOCTYPE html>
+ 	</style>
+ </head>
+ <body>
+-	
++
+ 	<h1>Welcome to Athens</h1>
+ 
+ 	<h2>Configuring your client</h2>
+@@ -107,7 +107,7 @@ func proxyHomeHandler(c *config.Config) http.HandlerFunc {
+ 		}
+ 
+ 		// This should be correct in most cases. If it is not, users can supply their own template
+-		templateData["Host"] = r.Host
++		templateData["Host"] = r.Header.Get("X-Forwarded-Proto") + "://" + r.Host
+ 
+ 		// use host from URL, if it exists
+ 		if r.URL.Host != "" {
