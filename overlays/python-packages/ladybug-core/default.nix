@@ -31,5 +31,4 @@ buildPythonPackage rec {
   pythonRelaxDeps = [ "click" ];
 
   pythonImportsCheck = [ "ladybug" ];
-  doCheck = false;
 }

@@ -24,5 +24,4 @@ buildPythonPackage rec {
   dependencies = [ numpy ];
 
   pythonImportsCheck = [ "pysolar" ];
-  doCheck = false;
 }

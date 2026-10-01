@@ -13,7 +13,17 @@
   };
 
   inputs = {
-    nixpkgs.url = "tarball+https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz";
+    nixpkgs.url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz";
+    nixpkgs-xlibre = {
+      url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs-xlibre/archive/corpix.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix.url = "tarball+https://git.tatikoma.dev/corpix/nix/archive/corpix.tar.gz";
+
+    deploy = {
+      url = "tarball+https://git.tatikoma.dev/corpix/deploy/archive/master.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
@@ -25,28 +35,6 @@
 
     microvm = {
       url = "github:microvm-nix/microvm.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    deploy = {
-      url = "tarball+https://git.tatikoma.dev/corpix/deploy/archive/master.tar.gz";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    nix.url = "tarball+https://git.tatikoma.dev/corpix/nix/archive/corpix.tar.gz";
-
-    nixpkgs-esp = {
-      url = "git+https://git.tatikoma.dev/corpix/nixpkgs-esp.git?ref=corpix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    nixpkgs-xlibre = {
-      url = "git+https://git.tatikoma.dev/corpix/nixpkgs-xlibre.git?ref=corpix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    pascal-language-server = {
-      url = "tarball+https://git.tatikoma.dev/corpix/pascal-language-server/archive/corpix.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

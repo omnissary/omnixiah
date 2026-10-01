@@ -29,5 +29,4 @@ buildPythonPackage rec {
   ];
 
   pythonImportsCheck = [ "ladybug_radiance" ];
-  doCheck = false;
 }

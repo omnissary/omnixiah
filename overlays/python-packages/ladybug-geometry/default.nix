@@ -22,5 +22,4 @@ buildPythonPackage rec {
   ];
 
   pythonImportsCheck = [ "ladybug_geometry" ];
-  doCheck = false;
 }

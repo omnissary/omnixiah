@@ -193,24 +193,6 @@
         "type": "github"
       }
     },
-    "flake-utils_2": {
-      "inputs": {
-        "systems": "systems_3"
-      },
-      "locked": {
-        "lastModified": 1731533236,
-        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "type": "github"
-      }
-    },
     "git-hooks-nix": {
       "inputs": {
         "flake-compat": [
@@ -488,25 +470,6 @@
         "url": "https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz"
       }
     },
-    "pascal-language-server": {
-      "inputs": {
-        "flake-utils": "flake-utils_2",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1782488967,
-        "narHash": "sha256-x1agcLU0rz7JnQRL3nyqYKJi4LBEBjns5/GUvj/tPeU=",
-        "rev": "3f6e61e7a92e1959b9c3fa9ad029ef42467b5342",
-        "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/corpix/pascal-language-server/archive/3f6e61e7a92e1959b9c3fa9ad029ef42467b5342.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://git.tatikoma.dev/corpix/pascal-language-server/archive/corpix.tar.gz"
-      }
-    },
     "root": {
       "inputs": {
         "deploy": "deploy",
@@ -516,7 +479,6 @@
         "nixpkgs": "nixpkgs_2",
         "nixpkgs-esp": "nixpkgs-esp",
         "nixpkgs-xlibre": "nixpkgs-xlibre",
-        "pascal-language-server": "pascal-language-server",
         "treefmt-nix": "treefmt-nix_2"
       }
     },
@@ -564,21 +526,6 @@
       "parent": [
         "nixpkgs-xlibre"
       ]
-    },
-    "systems_3": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
-      }
     },
     "treefmt-nix": {
       "inputs": {
