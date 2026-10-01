@@ -175,24 +175,6 @@
         "type": "github"
       }
     },
-    "flake-utils": {
-      "inputs": {
-        "systems": "systems"
-      },
-      "locked": {
-        "lastModified": 1726560853,
-        "narHash": "sha256-X6rJYSESBVr3hBoH0WbKE5KvhPU5bloyZ2L4K60/fPQ=",
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "rev": "c1dfcf08411b08f6b8615f7d8971a2bfa81d5e8a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "type": "github"
-      }
-    },
     "git-hooks-nix": {
       "inputs": {
         "flake-compat": [
@@ -379,28 +361,6 @@
         "type": "github"
       }
     },
-    "nixpkgs-esp": {
-      "inputs": {
-        "flake-utils": "flake-utils",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1772536960,
-        "narHash": "sha256-1eZqAldB1SK5z/yMfK9Jyi+iXM3rexA/rjsFOLGNwCM=",
-        "ref": "corpix",
-        "rev": "46f562174d7e8cc8464f5bacd0d7ccd09b55d529",
-        "revCount": 175,
-        "type": "git",
-        "url": "https://git.tatikoma.dev/corpix/nixpkgs-esp.git"
-      },
-      "original": {
-        "ref": "corpix",
-        "type": "git",
-        "url": "https://git.tatikoma.dev/corpix/nixpkgs-esp.git"
-      }
-    },
     "nixpkgs-lib": {
       "locked": {
         "lastModified": 1777168982,
@@ -439,35 +399,33 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "systems": "systems_2",
+        "systems": "systems",
         "xlibre-drivers-overlay-choice": "xlibre-drivers-overlay-choice",
         "xserver-meson-flags": "xserver-meson-flags"
       },
       "locked": {
         "lastModified": 1781521482,
         "narHash": "sha256-HENIwVsw2MpJ7PQZh5unK9YzIiRXxYrG6hawmGGonyk=",
-        "ref": "corpix",
         "rev": "a91ac8daefd2acea4afa5a7053e821c446047e8a",
-        "revCount": 138,
-        "type": "git",
-        "url": "https://git.tatikoma.dev/corpix/nixpkgs-xlibre.git"
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/corpix/nixpkgs-xlibre/archive/a91ac8daefd2acea4afa5a7053e821c446047e8a.tar.gz"
       },
       "original": {
-        "ref": "corpix",
-        "type": "git",
-        "url": "https://git.tatikoma.dev/corpix/nixpkgs-xlibre.git"
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/corpix/nixpkgs-xlibre/archive/corpix.tar.gz"
       }
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1782254168,
-        "narHash": "sha256-7JyGIaSApAODThpQWQMYmnqvRBCbOn3lslJcx957d88=",
+        "lastModified": 1789920653,
+        "narHash": "sha256-TvoH64wjslevsH7VpKEJfHsM2YObTifYP/RcylJPsjA=",
+        "rev": "f2c3d9699f860f599a6e2c26b8b1adcc03e0ac71",
         "type": "tarball",
-        "url": "https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/corpix/nixpkgs/archive/f2c3d9699f860f599a6e2c26b8b1adcc03e0ac71.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/omnissary/nixpkgs/archive/corpix.tar.gz"
+        "url": "https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz"
       }
     },
     "root": {
@@ -477,7 +435,6 @@
         "microvm": "microvm",
         "nix": "nix",
         "nixpkgs": "nixpkgs_2",
-        "nixpkgs-esp": "nixpkgs-esp",
         "nixpkgs-xlibre": "nixpkgs-xlibre",
         "treefmt-nix": "treefmt-nix_2"
       }
@@ -499,21 +456,6 @@
       }
     },
     "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
-      }
-    },
-    "systems_2": {
       "flake": false,
       "locked": {
         "path": "./systems.nix",
