@@ -28,6 +28,8 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
 
+    systems.url = "github:nix-systems/default";
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -106,7 +108,8 @@
       inherit (microvmLib) mkMicrovmProfile;
 
       profileNames = attrNames profileDefinitions;
-      systems = unique (map (name: profileDefinitions.${name}.system) profileNames);
+      profileSystems = unique (map (name: profileDefinitions.${name}.system) profileNames);
+      packageSystems = import inputs.systems;
 
       profileNamesFor = system: filter (name: profileDefinitions.${name}.system == system) profileNames;
 
@@ -114,7 +117,7 @@
         inherit (profile) description system;
       }) profileDefinitions;
 
-      pkgsFor = genAttrs systems (
+      pkgsFor = genAttrs packageSystems (
         system:
         import nixpkgs {
           inherit system;
@@ -172,7 +175,7 @@
         mapAttrs' (name: test: nameValuePair "module-${name}" test) moduleTests;
     in
     mkFlake { inherit inputs; } {
-      inherit systems;
+      systems = profileSystems;
 
       imports = [
         inputs.treefmt-nix.flakeModule
