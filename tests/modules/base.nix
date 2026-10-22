@@ -13,7 +13,7 @@ testing.runTest {
 
   nodes.machine = {
     imports = [
-      self.nixosModules.base
+      self.nixosProfiles.base
     ];
   };
 

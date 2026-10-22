@@ -137,8 +137,11 @@
           tests = testMetadata;
         };
 
+        nixosProfiles = {
+          base = ./profiles/base.nix;
+        };
+
         nixosModules = {
-          base = ./modules/base.nix;
           firewall = ./modules/firewall.nix;
           nix = ./modules/nix.nix;
           qemu = ./modules/qemu.nix;

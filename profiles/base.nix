@@ -19,14 +19,14 @@ in
 
 {
   imports = [
-    ./firewall.nix
-    ./nix.nix
-    ./serial.nix
-    ./sudo.nix
-    ./systemd.nix
-    ./tc.nix
-    ./timesync.nix
-    ./update-diff.nix
+    ../modules/firewall.nix
+    ../modules/nix.nix
+    ../modules/serial.nix
+    ../modules/sudo.nix
+    ../modules/systemd.nix
+    ../modules/tc.nix
+    ../modules/timesync.nix
+    ../modules/update-diff.nix
   ];
 
   system.stateVersion = mkDefault "25.11";

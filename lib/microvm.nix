@@ -24,7 +24,7 @@ in
 
       modules = [
         inputs.microvm.nixosModules.microvm
-        ../modules/base.nix
+        self.nixosProfiles.base
         {
           networking.hostName = mkDefault "omnixiah-${name}";
           nixpkgs.overlays = [ self.overlays.default ];
