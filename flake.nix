@@ -57,7 +57,25 @@
       inherit (lib) mapAttrs' nameValuePair unique;
       inherit (flake-parts.lib) mkFlake;
 
-      profileDefinitions = import ./profiles;
+      nixosProfiles = {
+        base = {
+          description = "Shared defaults for all Omnixiah systems";
+          module = ./profiles/base.nix;
+        };
+        microvm = {
+          description = "Insecure login defaults for disposable local MicroVMs";
+          module = ./profiles/microvm.nix;
+        };
+        minimal = {
+          description = "Minimal local QEMU MicroVM configuration";
+          module = ./profiles/minimal.nix;
+        };
+        qemu-guest = {
+          description = "Hardware defaults for NixOS guests running under QEMU";
+          module = ./profiles/qemu-guest.nix;
+        };
+      };
+      profileDefinitions = import ./profiles { inherit nixosProfiles; };
       testMetadata = import ./tests/metadata.nix;
       microvmLib = import ./lib/microvm.nix {
         inherit inputs self;
@@ -137,14 +155,11 @@
           tests = testMetadata;
         };
 
-        nixosProfiles = {
-          base = ./profiles/base.nix;
-        };
+        inherit nixosProfiles;
 
         nixosModules = {
           firewall = ./modules/firewall.nix;
           nix = ./modules/nix.nix;
-          qemu = ./modules/qemu.nix;
           serial = ./modules/serial.nix;
           sudo = ./modules/sudo.nix;
           systemd = ./modules/systemd.nix;

@@ -23,7 +23,7 @@ let
         inherit self;
       };
       modules = [
-        self.nixosProfiles.base
+        self.nixosProfiles.base.module
         {
           networking.hostName = "defaults";
         }

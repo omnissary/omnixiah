@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, `nixosModules`, and metadata. `lib/microvm.nix` exports `mkMicrovmProfile`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/default.nix` is the registry; `profiles/vm.nix` contains VM-only login defaults.
+Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, `nixosProfiles`, `nixosModules`, and metadata. `lib/microvm.nix` exports `mkMicrovmProfile`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/default.nix` is the runnable profile registry; `profiles/microvm.nix` contains insecure local MicroVM login defaults.
 
 Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
@@ -26,7 +26,7 @@ Use two-space indentation for Nix files. Use lower camel case for Nix option-sty
 
 Prefer local inherit bindings over repeated qualified calls: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
 
-No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles; root autologin and no-password login belong in `profiles/vm.nix`, not `profiles/base.nix`.
+No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles; root autologin and no-password login belong in `profiles/microvm.nix`, not `profiles/base.nix`.
 
 ## Testing Guidelines
 

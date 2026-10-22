@@ -18,7 +18,7 @@ testing.runTest {
 
   nodes.machine = {
     imports = [
-      self.nixosProfiles.base
+      self.nixosProfiles.base.module
     ];
 
     networking.firewall = {

@@ -1,10 +1,12 @@
+{ nixosProfiles }:
+
 {
   minimal = {
-    description = "Minimal Omnixiah MicroVM profile";
+    inherit (nixosProfiles.minimal) description;
     system = "x86_64-linux";
     modules = [
-      ./vm.nix
-      ./minimal.nix
+      nixosProfiles.microvm.module
+      nixosProfiles.minimal.module
     ];
   };
 }
