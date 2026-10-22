@@ -19,6 +19,7 @@ in
 
 {
   imports = [
+    ../modules/fail2ban.nix
     ../modules/firewall.nix
     ../modules/nix.nix
     ../modules/serial.nix

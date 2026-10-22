@@ -23,6 +23,14 @@ in
       system
       ;
   };
+  fail2ban = import ./modules/fail2ban.nix {
+    inherit
+      inputs
+      pkgs
+      self
+      system
+      ;
+  };
   firewall = import ./modules/firewall.nix {
     inherit pkgs self testing;
   };

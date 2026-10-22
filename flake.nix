@@ -154,6 +154,7 @@
         inherit nixosProfiles;
 
         nixosModules = {
+          fail2ban = ./modules/fail2ban.nix;
           firewall = ./modules/firewall.nix;
           nix = ./modules/nix.nix;
           serial = ./modules/serial.nix;
