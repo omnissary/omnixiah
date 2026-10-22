@@ -66,9 +66,9 @@
           description = "Insecure login defaults for disposable local MicroVMs";
           module = ./profiles/microvm.nix;
         };
-        qemu-guest = {
+        qemu = {
           description = "Hardware defaults for NixOS guests running under QEMU";
-          module = ./profiles/qemu-guest.nix;
+          module = ./profiles/qemu.nix;
         };
       };
       profileDefinitions = import ./profiles { inherit nixosProfiles; };
