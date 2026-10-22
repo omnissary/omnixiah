@@ -13,15 +13,15 @@
   };
 
   inputs = {
-    nixpkgs.url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs/archive/corpix.tar.gz";
+    nixpkgs.url = "tarball+https://git.tatikoma.dev/omnixiah/nixpkgs/archive/omnixiah.tar.gz";
     nixpkgs-xlibre = {
-      url = "tarball+https://git.tatikoma.dev/corpix/nixpkgs-xlibre/archive/corpix.tar.gz";
+      url = "tarball+https://git.tatikoma.dev/omnixiah/xlibre/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nix.url = "tarball+https://git.tatikoma.dev/corpix/nix/archive/corpix.tar.gz";
+    nix.url = "tarball+https://git.tatikoma.dev/omnixiah/nix/archive/omnixiah.tar.gz";
 
     deploy = {
-      url = "tarball+https://git.tatikoma.dev/corpix/deploy/archive/master.tar.gz";
+      url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
