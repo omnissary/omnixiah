@@ -26,7 +26,7 @@ Use two-space indentation for Nix files. Use lower camel case for Nix option-sty
 
 Prefer local inherit bindings over repeated qualified calls: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
 
-No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles; root autologin and no-password login belong in `profiles/microvm.nix`, not `profiles/base.nix`.
+No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles.
 
 ## Testing Guidelines
 
