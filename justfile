@@ -14,7 +14,7 @@ eval profile="minimal":
   nix eval {{nix_flags}} --raw .#nixosConfigurations.{{profile}}.config.networking.hostName
 
 build profile="minimal" nix_build_args="":
-  nix build {{nix_flags}} --show-trace {{nix_build_args}} .#packages.{{system}}.{{profile}}
+  nix build {{nix_flags}} --show-trace {{nix_build_args}} .#nixosConfigurations.{{profile}}.config.microvm.declaredRunner
 
 run profile="minimal":
   nix run {{nix_flags}} .#{{profile}}

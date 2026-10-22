@@ -13,7 +13,7 @@ testing.runTest {
 
   nodes.machine = {
     imports = [
-      self.nixosProfiles.base.module
+      self.profiles.base.module
     ];
 
     networking.tc.shaper = {

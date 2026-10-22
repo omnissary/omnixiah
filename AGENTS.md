@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, packages, apps, checks, formatter, `nixosProfiles`, `nixosModules`, and metadata. `lib/microvm.nix` exports `mkMicrovmProfile`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/default.nix` is the runnable profile registry; `profiles/microvm.nix` contains insecure local MicroVM login defaults.
+Omnixiah is a NixOS spin built around MicroVM profiles. The root `flake.nix` defines inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, `modules`, and metadata. `lib/microvm.nix` exports `mkMicrovmProfile`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/default.nix` is the runnable profile registry; `profiles/microvm.nix` contains insecure local MicroVM login defaults.
 
 Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
@@ -18,7 +18,7 @@ Use the lowercase `justfile` as the command surface.
 - `just test`: run all module tests from `.#lib.tests`.
 - `just fmt`: run treefmt through `nix fmt`.
 
-Direct Nix commands are acceptable for debugging, for example `nix build .#packages.x86_64-linux.minimal`.
+Direct Nix commands are acceptable for debugging, for example `nix build .#nixosConfigurations.minimal.config.microvm.declaredRunner`.
 
 ## Coding Style & Naming Conventions
 

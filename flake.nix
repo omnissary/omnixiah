@@ -50,14 +50,22 @@
       inherit (builtins)
         attrNames
         filter
+        intersectAttrs
         listToAttrs
         mapAttrs
         ;
       inherit (nixpkgs) lib;
-      inherit (lib) mapAttrs' nameValuePair unique;
+      inherit (lib)
+        composeManyExtensions
+        concatStringsSep
+        genAttrs
+        mapAttrs'
+        nameValuePair
+        unique
+        ;
       inherit (flake-parts.lib) mkFlake;
 
-      nixosProfiles = {
+      profiles = {
         base = {
           description = "Shared defaults for all Omnixiah systems";
           module = ./profiles/base.nix;
@@ -71,12 +79,30 @@
           module = ./profiles/qemu.nix;
         };
       };
-      profileDefinitions = import ./profiles { inherit nixosProfiles; };
+      profileDefinitions = import ./profiles { inherit profiles; };
       testMetadata = import ./tests/metadata.nix;
       microvmLib = import ./lib/microvm.nix {
         inherit inputs self;
       };
-      overlay = import ./overlays { inherit inputs; };
+      ownLib = microvmLib // {
+        profiles = profileMetadata;
+        tests = testMetadata;
+      };
+      libCollisions = attrNames (intersectAttrs lib ownLib);
+      flakeLib =
+        if libCollisions == [ ] then
+          lib // ownLib
+        else
+          throw "Omnixiah lib collides with nixpkgs lib: ${concatStringsSep ", " libCollisions}";
+
+      namedOverlays = {
+        omnixiah = import ./overlays { inherit inputs; };
+      };
+      enabledOverlayNames = [ "omnixiah" ];
+      overlay = composeManyExtensions (map (name: namedOverlays.${name}) enabledOverlayNames);
+      overlays = namedOverlays // {
+        default = overlay;
+      };
       inherit (microvmLib) mkMicrovmProfile;
 
       profileNames = attrNames profileDefinitions;
@@ -87,6 +113,15 @@
       profileMetadata = mapAttrs (_: profile: {
         inherit (profile) description system;
       }) profileDefinitions;
+
+      pkgsFor = genAttrs systems (
+        system:
+        import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+          overlays = [ overlay ];
+        }
+      );
 
       profilePackages =
         system:
@@ -112,7 +147,7 @@
             name = "${name}-eval";
             value =
               let
-                pkgs = nixpkgs.legacyPackages.${system};
+                pkgs = pkgsFor.${system};
                 config = self.nixosConfigurations.${name}.config;
               in
               pkgs.writeText "omnixiah-${name}-eval" config.system.build.toplevel.drvPath;
@@ -144,16 +179,12 @@
       ];
 
       flake = {
-        overlays.default = overlay;
+        inherit overlays profiles;
 
-        lib = microvmLib // {
-          profiles = profileMetadata;
-          tests = testMetadata;
-        };
+        lib = flakeLib;
+        pkgs = pkgsFor;
 
-        inherit nixosProfiles;
-
-        nixosModules = {
+        modules = {
           fail2ban = ./modules/fail2ban.nix;
           firewall = ./modules/firewall.nix;
           nix = ./modules/nix.nix;
@@ -179,20 +210,11 @@
         let
           inherit (pkgs) jq just;
 
-          pkgs = import inputs.nixpkgs {
-            inherit system;
-            config.allowUnfree = true;
-            overlays = [ overlay ];
-          };
-          packages = profilePackages system;
+          pkgs = pkgsFor.${system};
           apps = profileApps system;
         in
         {
           _module.args.pkgs = pkgs;
-
-          packages = packages // {
-            default = packages.minimal;
-          };
 
           apps = apps // {
             default = apps.minimal;
