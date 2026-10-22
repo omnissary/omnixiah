@@ -66,10 +66,6 @@
           description = "Insecure login defaults for disposable local MicroVMs";
           module = ./profiles/microvm.nix;
         };
-        minimal = {
-          description = "Minimal local QEMU MicroVM configuration";
-          module = ./profiles/minimal.nix;
-        };
         qemu-guest = {
           description = "Hardware defaults for NixOS guests running under QEMU";
           module = ./profiles/qemu-guest.nix;

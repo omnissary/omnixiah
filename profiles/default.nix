@@ -2,11 +2,10 @@
 
 {
   minimal = {
-    inherit (nixosProfiles.minimal) description;
+    description = "Minimal Omnixiah system";
     system = "x86_64-linux";
     modules = [
       nixosProfiles.microvm.module
-      nixosProfiles.minimal.module
     ];
   };
 }
