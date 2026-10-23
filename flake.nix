@@ -277,7 +277,7 @@
           };
 
           treefmt = {
-            projectRootFile = ".git/config";
+            projectRootFile = "flake.nix";
 
             programs.shellcheck.enable = true;
 
