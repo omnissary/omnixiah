@@ -14,7 +14,7 @@
 
   inputs = {
     nixpkgs.url = "tarball+https://git.tatikoma.dev/omnixiah/nixpkgs/archive/omnixiah.tar.gz";
-    nixpkgs-xlibre = {
+    xlibre = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/xlibre/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };

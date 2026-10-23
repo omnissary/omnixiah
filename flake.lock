@@ -54,7 +54,7 @@
         "type": "path"
       },
       "parent": [
-        "nixpkgs-xlibre"
+        "xlibre"
       ]
     },
     "flake-compat": {
@@ -392,29 +392,6 @@
         "type": "github"
       }
     },
-    "nixpkgs-xlibre": {
-      "inputs": {
-        "fetchurl-sources": "fetchurl-sources",
-        "flake-parts": "flake-parts_5",
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "systems": "systems",
-        "xlibre-drivers-overlay-choice": "xlibre-drivers-overlay-choice",
-        "xserver-meson-flags": "xserver-meson-flags"
-      },
-      "locked": {
-        "lastModified": 1781521482,
-        "narHash": "sha256-HENIwVsw2MpJ7PQZh5unK9YzIiRXxYrG6hawmGGonyk=",
-        "rev": "a91ac8daefd2acea4afa5a7053e821c446047e8a",
-        "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/xlibre/archive/a91ac8daefd2acea4afa5a7053e821c446047e8a.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://git.tatikoma.dev/omnixiah/xlibre/archive/omnixiah.tar.gz"
-      }
-    },
     "nixpkgs_2": {
       "locked": {
         "lastModified": 1792688482,
@@ -435,9 +412,9 @@
         "microvm": "microvm",
         "nix": "nix",
         "nixpkgs": "nixpkgs_2",
-        "nixpkgs-xlibre": "nixpkgs-xlibre",
-        "systems": "systems_2",
-        "treefmt-nix": "treefmt-nix_2"
+        "systems": "systems",
+        "treefmt-nix": "treefmt-nix_2",
+        "xlibre": "xlibre"
       }
     },
     "spectrum": {
@@ -457,20 +434,6 @@
       }
     },
     "systems": {
-      "flake": false,
-      "locked": {
-        "path": "./systems.nix",
-        "type": "path"
-      },
-      "original": {
-        "path": "./systems.nix",
-        "type": "path"
-      },
-      "parent": [
-        "nixpkgs-xlibre"
-      ]
-    },
-    "systems_2": {
       "locked": {
         "lastModified": 1791244623,
         "narHash": "sha256-uuanbkFk8a313Zfrxdcz8Us/yQtaxNnKJtX8v0ZPpd8=",
@@ -484,6 +447,20 @@
         "repo": "default",
         "type": "github"
       }
+    },
+    "systems_2": {
+      "flake": false,
+      "locked": {
+        "path": "./systems.nix",
+        "type": "path"
+      },
+      "original": {
+        "path": "./systems.nix",
+        "type": "path"
+      },
+      "parent": [
+        "xlibre"
+      ]
     },
     "treefmt-nix": {
       "inputs": {
@@ -527,6 +504,29 @@
         "type": "github"
       }
     },
+    "xlibre": {
+      "inputs": {
+        "fetchurl-sources": "fetchurl-sources",
+        "flake-parts": "flake-parts_5",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "systems": "systems_2",
+        "xlibre-drivers-overlay-choice": "xlibre-drivers-overlay-choice",
+        "xserver-meson-flags": "xserver-meson-flags"
+      },
+      "locked": {
+        "lastModified": 1781521482,
+        "narHash": "sha256-HENIwVsw2MpJ7PQZh5unK9YzIiRXxYrG6hawmGGonyk=",
+        "rev": "a91ac8daefd2acea4afa5a7053e821c446047e8a",
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/xlibre/archive/a91ac8daefd2acea4afa5a7053e821c446047e8a.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/xlibre/archive/omnixiah.tar.gz"
+      }
+    },
     "xlibre-drivers-overlay-choice": {
       "flake": false,
       "locked": {
@@ -538,7 +538,7 @@
         "type": "path"
       },
       "parent": [
-        "nixpkgs-xlibre"
+        "xlibre"
       ]
     },
     "xserver-meson-flags": {
@@ -552,7 +552,7 @@
         "type": "path"
       },
       "parent": [
-        "nixpkgs-xlibre"
+        "xlibre"
       ]
     }
   },

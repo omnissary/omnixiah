@@ -59,10 +59,10 @@ let
       overlayNames = [
         "xlibre-xserver"
       ]
-      ++ filter (name: name != "xlibre-xserver") (attrNames inputs.nixpkgs-xlibre.overlays);
+      ++ filter (name: name != "xlibre-xserver") (attrNames inputs.xlibre.overlays);
     in
     xlibrePrev.lib.composeManyExtensions (map (
-      name: inputs.nixpkgs-xlibre.overlays.${name}
+      name: inputs.xlibre.overlays.${name}
     ) overlayNames) xlibreFinal xlibrePrev;
 
 in
