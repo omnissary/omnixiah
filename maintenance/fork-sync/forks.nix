@@ -150,6 +150,22 @@ in
     directory = "nixos-anywhere";
     upstreamBranch = "main";
     upstreamUrl = "https://github.com/nix-community/nixos-anywhere";
+    checks = [
+      [
+        "nix"
+        "eval"
+        "--raw"
+        ".#packages.x86_64-linux.nixos-anywhere.drvPath"
+      ]
+      [
+        "nix"
+        "eval"
+        "--json"
+        ".#checks.x86_64-linux"
+        "--apply"
+        "builtins.attrNames"
+      ]
+    ];
   };
 
   nixpkgs = mkFork {
