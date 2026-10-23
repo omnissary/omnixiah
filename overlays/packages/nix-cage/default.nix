@@ -13,7 +13,7 @@ final: _prev: {
 
     stdenvNoCC.mkDerivation {
       pname = "nix-cage";
-      version = "0-unstable-2026-06-02";
+      version = "1.0.0-unstable-2026-06-02";
       src = fetchFromGitea {
         domain = "git.tatikoma.dev";
         owner = "corpix";
@@ -47,7 +47,7 @@ final: _prev: {
         extraArgs = [
           "--flake"
           "--version=branch"
-          "--version-regex=(0-unstable-.*)"
+          "--version-regex=v?(.*-unstable-.*)"
         ];
       };
 
