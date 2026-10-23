@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+config_file="$script_dir/config.nix"
+state_root="${XDG_STATE_HOME:-${HOME}/.local/state}/omnixiah/fork-sync"
+if [[ -n ${FORK_SYNC_WORKSPACE_ROOT:-} ]]; then
+  workspace_root=$FORK_SYNC_WORKSPACE_ROOT
+else
+  repository_root=$(git -C "$script_dir" rev-parse --show-toplevel)
+  workspace_root=$(dirname "$repository_root")
+fi
+
+source "$script_dir/lib/config.sh"
+source "$script_dir/lib/git.sh"
+source "$script_dir/lib/updates.sh"
+source "$script_dir/lib/lifecycle.sh"
+
+usage() {
+  printf '%s\n' \
+    'usage: sync [--config FILE] status' \
+    '       sync [--config FILE] prepare NAME [--update]' \
+    '       sync [--config FILE] prepare-all [--update]' \
+    '       sync [--config FILE] continue NAME' \
+    '       sync [--config FILE] abort NAME' \
+    '       sync [--config FILE] push NAME' \
+    '       sync [--config FILE] push-all'
+}
+
+if [[ ${1:-} == --config ]]; then
+  [[ $# -ge 3 ]] || {
+    usage >&2
+    exit 2
+  }
+  config_file=$2
+  shift 2
+fi
+
+load_config "$config_file"
+
+command=${1:-}
+case $command in
+  status)
+    [[ $# -eq 1 ]] || exit 2
+    status_forks
+    ;;
+  prepare)
+    [[ $# -ge 2 && $# -le 3 ]] || {
+      usage >&2
+      exit 2
+    }
+    update_requested=false
+    if [[ ${3:-} == --update ]]; then
+      update_requested=true
+    elif [[ $# -eq 3 ]]; then
+      usage >&2
+      exit 2
+    fi
+    prepare_fork "$2" "$update_requested"
+    ;;
+  prepare-all)
+    [[ $# -le 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    update_requested=false
+    if [[ ${2:-} == --update ]]; then
+      update_requested=true
+    elif [[ $# -eq 2 ]]; then
+      usage >&2
+      exit 2
+    fi
+    while IFS= read -r name; do
+      prepare_fork "$name" "$update_requested"
+    done < <(fork_names)
+    ;;
+  continue)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    continue_fork "$2"
+    ;;
+  abort)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    abort_fork "$2"
+    ;;
+  push)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    push_fork "$2"
+    ;;
+  push-all)
+    [[ $# -eq 1 ]] || {
+      usage >&2
+      exit 2
+    }
+    while IFS= read -r name; do
+      if [[ -f $(state_file "$name") ]]; then
+        push_fork "$name"
+      fi
+    done < <(fork_names)
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

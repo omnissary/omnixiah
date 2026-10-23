@@ -241,7 +241,11 @@
           ...
         }:
         let
-          inherit (pkgs) jq just;
+          inherit (pkgs)
+            git
+            jq
+            just
+            ;
 
           pkgs = pkgsFor.${system};
           apps = profileApps system;
@@ -253,10 +257,16 @@
             default = apps.minimal;
           };
 
-          checks = profileChecks system // moduleChecks { inherit pkgs system; };
+          checks =
+            profileChecks system
+            // moduleChecks { inherit pkgs system; }
+            // {
+              fork-sync = import ./maintenance/fork-sync/tests { inherit pkgs; };
+            };
 
           devShells.default = pkgs.mkShellNoCC {
             packages = [
+              git
               just
               jq
             ]

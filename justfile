@@ -32,3 +32,24 @@ test test="all":
 
 fmt:
   nix fmt {{nix_flags}}
+
+sync-status:
+  maintenance/fork-sync/sync status
+
+sync repo *args:
+  maintenance/fork-sync/sync prepare {{repo}} {{args}}
+
+sync-all *args:
+  maintenance/fork-sync/sync prepare-all {{args}}
+
+sync-continue repo:
+  maintenance/fork-sync/sync continue {{repo}}
+
+sync-abort repo:
+  maintenance/fork-sync/sync abort {{repo}}
+
+sync-push repo:
+  maintenance/fork-sync/sync push {{repo}}
+
+sync-push-all:
+  maintenance/fork-sync/sync push-all
