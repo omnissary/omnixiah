@@ -46,12 +46,12 @@ final: _prev: {
     in
     buildPythonApplication rec {
       pname = "bCNC";
-      version = "2dc769ee801a00e33418ed6c0b707d9c9ce83d76";
+      version = "0-unstable-2026-10-23";
 
       src = fetchFromGitHub {
         owner = "vlachoudis";
         repo = "bCNC";
-        rev = version;
+        rev = "2dc769ee801a00e33418ed6c0b707d9c9ce83d76";
         hash = "sha256-p1hydSQjL0Di1WKf1CLqgz+nNZ5RhtHcVR77rikmC64=";
       };
 
@@ -80,6 +80,7 @@ final: _prev: {
         extraArgs = [
           "--flake"
           "--version=branch"
+          "--version-regex=(0-unstable-.*)"
         ];
       };
 
