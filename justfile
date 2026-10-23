@@ -41,6 +41,21 @@ test test="all":
 fmt:
   nix fmt {{nix_flags}}
 
+update-list:
+  maintenance/package-update/update list
+
+update package:
+  maintenance/package-update/update run {{package}}
+
+update-all:
+  maintenance/package-update/update run-all
+
+update-continue package:
+  maintenance/package-update/update continue {{package}}
+
+update-abort package:
+  maintenance/package-update/update abort {{package}}
+
 sync-status:
   maintenance/fork-sync/sync status
 

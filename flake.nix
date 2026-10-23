@@ -262,6 +262,7 @@
             // moduleChecks { inherit pkgs system; }
             // {
               fork-sync = import ./maintenance/fork-sync/tests { inherit pkgs; };
+              package-update = import ./maintenance/package-update/tests { inherit pkgs; };
             };
 
           devShells.default = pkgs.mkShellNoCC {

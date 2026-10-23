@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+config_file="$script_dir/config.nix"
+repository_root=${PACKAGE_UPDATE_REPOSITORY_ROOT:-$(git -C "$script_dir" rev-parse --show-toplevel)}
+state_root="${XDG_STATE_HOME:-${HOME}/.local/state}/omnixiah/package-update"
+system=${PACKAGE_UPDATE_SYSTEM:-$(nix eval --raw --impure --expr builtins.currentSystem)}
+
+source "$script_dir/lib/config.sh"
+source "$script_dir/lib/git.sh"
+source "$script_dir/lib/lifecycle.sh"
+
+usage() {
+  printf '%s\n' \
+    'usage: update [--config FILE] list' \
+    '       update [--config FILE] run NAME' \
+    '       update [--config FILE] run-all' \
+    '       update [--config FILE] continue NAME' \
+    '       update [--config FILE] abort NAME'
+}
+
+if [[ ${1:-} == --config ]]; then
+  [[ $# -ge 3 ]] || {
+    usage >&2
+    exit 2
+  }
+  config_file=$2
+  shift 2
+fi
+
+load_config "$config_file"
+
+command=${1:-}
+case $command in
+  list)
+    [[ $# -eq 1 ]] || exit 2
+    status_updates
+    ;;
+  run)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    prepare_update "$2"
+    ;;
+  run-all)
+    [[ $# -eq 1 ]] || {
+      usage >&2
+      exit 2
+    }
+    while IFS= read -r name; do
+      prepare_update "$name"
+    done < <(package_names)
+    ;;
+  continue)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    continue_update "$2"
+    ;;
+  abort)
+    [[ $# -eq 2 ]] || {
+      usage >&2
+      exit 2
+    }
+    abort_update "$2"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
