@@ -128,6 +128,22 @@ in
     directory = "nix";
     upstreamBranch = "master";
     upstreamUrl = "https://github.com/nixOS/nix";
+    checks = [
+      [
+        "nix"
+        "eval"
+        "--raw"
+        ".#packages.x86_64-linux.nix.drvPath"
+      ]
+      [
+        "nix"
+        "eval"
+        "--json"
+        ".#checks.x86_64-linux"
+        "--apply"
+        "builtins.attrNames"
+      ]
+    ];
   };
 
   nixos-anywhere = mkFork {
