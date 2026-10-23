@@ -132,6 +132,8 @@ prepare_fork() {
   local file repo_config path branch upstream_remote upstream_branch destination_remote destination_branch
   local upstream_url destination_url upstream_ref old_head remote_oid tag tag_created update_ran=false status
 
+  printf 'fork-sync: preparing %s\n' "$name"
+
   file=$(state_file "$name")
   if [[ -e $file ]]; then
     printf 'fork-sync: synchronization already active for %s\n' "$name" >&2

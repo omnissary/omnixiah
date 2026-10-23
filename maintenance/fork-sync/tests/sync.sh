@@ -79,7 +79,8 @@ jq -n \
   }' >"$config"
 
 old_remote=$(git --git-dir="$destination" rev-parse refs/heads/omnixiah)
-run_sync prepare demo --update
+prepare_output=$(run_sync prepare demo --update)
+grep -q '^fork-sync: preparing demo$' <<<"$prepare_output"
 
 [[ $(jq -r '.stage' "$state/omnixiah/fork-sync/demo.json") == ready ]]
 [[ $(git --git-dir="$destination" rev-parse refs/heads/omnixiah) == "$old_remote" ]]
