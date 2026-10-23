@@ -48,6 +48,9 @@ let
     ++ optionals (!hasAttrByPath [ "home-manager" ] options) [
       "Home Manager module is not imported"
     ]
+    ++ optionals (!hasAttrByPath [ "sops" ] options) [
+      "SOPS module is not imported"
+    ]
     ++ optionals (!cfg.services.timesyncd.enable) [
       "services.timesyncd.enable is not true"
     ]

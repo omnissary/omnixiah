@@ -35,6 +35,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    sops = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/sops-nix/archive/omnixiah.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     deploy = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -90,6 +95,7 @@
             imports = [
               inputs.disko.nixosModules.default
               inputs.home-manager.nixosModules.default
+              inputs.sops.nixosModules.default
               ./profiles/base.nix
             ];
           };

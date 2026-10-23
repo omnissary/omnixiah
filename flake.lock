@@ -485,9 +485,28 @@
         "microvm": "microvm",
         "nix": "nix",
         "nixpkgs": "nixpkgs_2",
+        "sops": "sops",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix_2",
         "xlibre": "xlibre"
+      }
+    },
+    "sops": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792655475,
+        "narHash": "sha256-4ChDjNgJM5uKwTuecLHxGlafAtoyKo5a7ip23J5IG3M=",
+        "rev": "e80b8b733d8452a751a25d0063abc9683b6c8185",
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/sops-nix/archive/e80b8b733d8452a751a25d0063abc9683b6c8185.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/sops-nix/archive/omnixiah.tar.gz"
       }
     },
     "spectrum": {
