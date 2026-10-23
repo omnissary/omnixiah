@@ -92,6 +92,24 @@ in
     directory = "flake-parts";
     upstreamBranch = "main";
     upstreamUrl = "https://github.com/hercules-ci/flake-parts";
+    checks = [
+      [
+        "nix"
+        "eval"
+        "--json"
+        ".#flakeModules"
+        "--apply"
+        "builtins.attrNames"
+      ]
+      [
+        "nix"
+        "eval"
+        "--json"
+        ".#templates"
+        "--apply"
+        "builtins.attrNames"
+      ]
+    ];
   };
 
   home-manager = mkFork {
