@@ -305,23 +305,25 @@ push_fork() {
 status_forks() {
   local name repo_config path branch head cleanliness stage file
 
-  printf 'NAME\tBRANCH\tHEAD\tWORKTREE\tSYNC\n'
-  while IFS= read -r name; do
-    repo_config=$(fork_config "$name")
-    path=$(fork_path "$repo_config")
-    branch=$(git_in "$path" branch --show-current 2>/dev/null || printf missing)
-    head=$(git_in "$path" rev-parse --short=12 HEAD 2>/dev/null || printf missing)
-    if [[ -n $(git_in "$path" status --porcelain 2>/dev/null) ]]; then
-      cleanliness=dirty
-    else
-      cleanliness=clean
-    fi
-    file=$(state_file "$name")
-    if [[ -f $file ]]; then
-      stage=$(jq -r '.stage' "$file")
-    else
-      stage=idle
-    fi
-    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$branch" "$head" "$cleanliness" "$stage"
-  done < <(fork_names)
+  {
+    printf 'NAME\tBRANCH\tHEAD\tWORKTREE\tSYNC\n'
+    while IFS= read -r name; do
+      repo_config=$(fork_config "$name")
+      path=$(fork_path "$repo_config")
+      branch=$(git_in "$path" branch --show-current 2>/dev/null || printf missing)
+      head=$(git_in "$path" rev-parse --short=12 HEAD 2>/dev/null || printf missing)
+      if [[ -n $(git_in "$path" status --porcelain 2>/dev/null) ]]; then
+        cleanliness=dirty
+      else
+        cleanliness=clean
+      fi
+      file=$(state_file "$name")
+      if [[ -f $file ]]; then
+        stage=$(jq -r '.stage' "$file")
+      else
+        stage=idle
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$branch" "$head" "$cleanliness" "$stage"
+    done < <(fork_names)
+  } | column -t -s $'\t'
 }
