@@ -5,6 +5,7 @@ final: _prev: {
       python3Packages,
       fetchFromGitHub,
       fetchPypi,
+      nix-update-script,
     }:
 
     let
@@ -75,6 +76,13 @@ final: _prev: {
         opencv-python
         scipy
       ];
+
+      passthru.updateScript = nix-update-script {
+        extraArgs = [
+          "--flake"
+          "--version=branch"
+        ];
+      };
 
       meta = {
         description = "GRBL CNC command sender, autoleveler and g-code editor";

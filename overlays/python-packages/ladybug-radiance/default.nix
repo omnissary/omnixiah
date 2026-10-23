@@ -2,6 +2,7 @@
   buildPythonPackage,
   fetchPypi,
   ladybug-core,
+  nix-update-script,
   numpy,
   setuptools,
   setuptools-scm,
@@ -29,4 +30,8 @@ buildPythonPackage rec {
   ];
 
   pythonImportsCheck = [ "ladybug_radiance" ];
+
+  passthru.updateScript = nix-update-script {
+    extraArgs = [ "--flake" ];
+  };
 }

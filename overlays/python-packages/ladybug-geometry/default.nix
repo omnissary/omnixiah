@@ -1,6 +1,7 @@
 {
   buildPythonPackage,
   fetchPypi,
+  nix-update-script,
   setuptools,
   setuptools-scm,
 }:
@@ -22,4 +23,8 @@ buildPythonPackage rec {
   ];
 
   pythonImportsCheck = [ "ladybug_geometry" ];
+
+  passthru.updateScript = nix-update-script {
+    extraArgs = [ "--flake" ];
+  };
 }

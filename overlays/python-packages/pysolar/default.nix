@@ -1,6 +1,7 @@
 {
   buildPythonPackage,
   fetchPypi,
+  nix-update-script,
   numpy,
   setuptools,
   setuptools-scm,
@@ -24,4 +25,8 @@ buildPythonPackage rec {
   dependencies = [ numpy ];
 
   pythonImportsCheck = [ "pysolar" ];
+
+  passthru.updateScript = nix-update-script {
+    extraArgs = [ "--flake" ];
+  };
 }

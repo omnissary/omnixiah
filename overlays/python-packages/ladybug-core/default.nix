@@ -3,6 +3,7 @@
   click,
   fetchPypi,
   ladybug-geometry,
+  nix-update-script,
   setuptools,
   setuptools-scm,
 }:
@@ -31,4 +32,8 @@ buildPythonPackage rec {
   pythonRelaxDeps = [ "click" ];
 
   pythonImportsCheck = [ "ladybug" ];
+
+  passthru.updateScript = nix-update-script {
+    extraArgs = [ "--flake" ];
+  };
 }
