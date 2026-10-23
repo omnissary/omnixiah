@@ -252,15 +252,17 @@ abort_update() {
 status_updates() {
   local name config file stage
 
-  printf 'NAME\tATTRIBUTE\tSTATE\n'
-  while IFS= read -r name; do
-    config=$(package_config "$name")
-    file=$(state_file "$name")
-    if [[ -f $file ]]; then
-      stage=$(jq -r '.stage' "$file")
-    else
-      stage=idle
-    fi
-    printf '%s\t%s\t%s\n' "$name" "$(jq -r '.attrPath' <<<"$config")" "$stage"
-  done < <(package_names)
+  {
+    printf 'NAME\tATTRIBUTE\tSTATE\n'
+    while IFS= read -r name; do
+      config=$(package_config "$name")
+      file=$(state_file "$name")
+      if [[ -f $file ]]; then
+        stage=$(jq -r '.stage' "$file")
+      else
+        stage=idle
+      fi
+      printf '%s\t%s\t%s\n' "$name" "$(jq -r '.attrPath' <<<"$config")" "$stage"
+    done < <(package_names)
+  } | column -t -s $'\t'
 }

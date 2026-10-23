@@ -56,7 +56,7 @@ run_update() {
 }
 
 write_config "$updater"
-run_update list | grep -q $'demo\tdemo\tidle'
+run_update list | grep -Eq 'demo +demo +idle'
 
 run_update run demo
 [[ $(<"$repository/version") == 2 ]]

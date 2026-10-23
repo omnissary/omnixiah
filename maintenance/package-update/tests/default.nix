@@ -5,6 +5,7 @@ pkgs.runCommand "omnixiah-package-update-test"
       pkgs.bash
       pkgs.git
       pkgs.jq
+      pkgs.util-linux
     ];
   }
   ''
