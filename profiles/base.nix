@@ -1,7 +1,6 @@
 {
   lib,
   pkgs,
-  self,
   ...
 }:
 
@@ -31,7 +30,6 @@ in
   ];
 
   system.stateVersion = mkDefault "25.11";
-  system.configurationRevision = self.rev or self.dirtyRev or null;
 
   nixpkgs.config.allowUnfree = mkDefault true;
 
