@@ -30,6 +30,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    dns = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/dns/archive/omnixiah.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     deploy = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -104,6 +109,7 @@
         inherit inputs self;
       };
       ownLib = microvmLib // {
+        dns = inputs.dns.lib;
         profiles = profileMetadata;
         tests = testMetadata;
       };

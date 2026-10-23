@@ -1,4 +1,7 @@
 {
+  dns = {
+    description = "DNS library export evaluation test";
+  };
   base = {
     description = "Base module defaults NixOS VM test";
   };

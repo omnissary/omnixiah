@@ -12,6 +12,9 @@ let
 in
 
 {
+  dns = import ./lib/dns.nix {
+    inherit pkgs self;
+  };
   base = import ./modules/base.nix {
     inherit self testing;
   };
