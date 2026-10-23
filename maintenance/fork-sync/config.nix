@@ -25,14 +25,24 @@ let
 
   remote =
     name: kind: value:
-    require (isAttrs value) "fork ${name}: ${kind} must be an attribute set" {
-      remote =
-        require (isString value.remote) "fork ${name}: ${kind}.remote must be a string"
-          value.remote;
-      branch =
-        require (isString value.branch) "fork ${name}: ${kind}.branch must be a string"
-          value.branch;
-    };
+    require (isAttrs value) "fork ${name}: ${kind} must be an attribute set" (
+      {
+        remote =
+          require (isString value.remote) "fork ${name}: ${kind}.remote must be a string"
+            value.remote;
+        branch =
+          require (isString value.branch) "fork ${name}: ${kind}.branch must be a string"
+            value.branch;
+      }
+      // (
+        if value ? url then
+          {
+            url = require (isString value.url) "fork ${name}: ${kind}.url must be a string" value.url;
+          }
+        else
+          { }
+      )
+    );
 
   update =
     name: value:

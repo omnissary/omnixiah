@@ -130,7 +130,7 @@ prepare_fork() {
   local name=$1
   local update_requested=$2
   local file repo_config path branch upstream_remote upstream_branch destination_remote destination_branch
-  local upstream_ref old_head remote_oid tag tag_created update_ran=false status
+  local upstream_url destination_url upstream_ref old_head remote_oid tag tag_created update_ran=false status
 
   file=$(state_file "$name")
   if [[ -e $file ]]; then
@@ -143,16 +143,21 @@ prepare_fork() {
   branch=$(jq -r '.branch' <<<"$repo_config")
   upstream_remote=$(jq -r '.upstream.remote' <<<"$repo_config")
   upstream_branch=$(jq -r '.upstream.branch' <<<"$repo_config")
+  upstream_url=$(jq -r '.upstream.url // empty' <<<"$repo_config")
   destination_remote=$(jq -r '.destination.remote' <<<"$repo_config")
   destination_branch=$(jq -r '.destination.branch' <<<"$repo_config")
+  destination_url=$(jq -r '.destination.url // empty' <<<"$repo_config")
 
   require_repository "$path"
   require_clean_repository "$path"
   require_branch "$path" "$branch"
+  ensure_remote "$path" "$upstream_remote" "$upstream_url"
+  ensure_remote "$path" "$destination_remote" "$destination_url"
   fetch_remotes "$path" "$upstream_remote" "$destination_remote"
+  require_remote_branch "$path" "$upstream_remote" "$upstream_branch"
+  require_remote_branch "$path" "$destination_remote" "$destination_branch"
 
   upstream_ref=$(remote_ref "$upstream_remote" "$upstream_branch")
-  git_in "$path" rev-parse "$upstream_ref^{commit}" >/dev/null
   old_head=$(git_in "$path" rev-parse HEAD)
   remote_oid=$(remote_branch_oid "$path" "$destination_remote" "$destination_branch")
   if [[ $old_head != "$remote_oid" ]]; then

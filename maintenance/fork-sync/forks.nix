@@ -2,8 +2,8 @@ let
   mkFork =
     {
       directory,
-      upstreamRemote,
       upstreamBranch,
+      upstreamUrl,
       branch ? "omnixiah",
       destinationRemote ? "tatikoma",
       destinationBranch ? branch,
@@ -25,8 +25,9 @@ let
         ;
 
       upstream = {
-        remote = upstreamRemote;
+        remote = "upstream";
         branch = upstreamBranch;
+        url = upstreamUrl;
       };
 
       destination = {
@@ -47,61 +48,61 @@ in
 {
   authentik = mkFork {
     directory = "authentik";
-    upstreamRemote = "tatikoma";
     upstreamBranch = "main";
+    upstreamUrl = "https://github.com/nix-community/authentik-nix";
   };
 
   disko = mkFork {
     directory = "disko";
-    upstreamRemote = "origin";
     upstreamBranch = "master";
+    upstreamUrl = "https://github.com/nix-community/disko";
   };
 
   flake-parts = mkFork {
     directory = "flake-parts";
-    upstreamRemote = "origin";
     upstreamBranch = "main";
+    upstreamUrl = "https://github.com/hercules-ci/flake-parts";
   };
 
   home-manager = mkFork {
     directory = "home-manager";
-    upstreamRemote = "origin";
     upstreamBranch = "master";
+    upstreamUrl = "https://github.com/nix-community/home-manager";
   };
 
   mailserver = mkFork {
     directory = "mailserver";
-    upstreamRemote = "tatikoma";
-    upstreamBranch = "master";
+    upstreamBranch = "main";
+    upstreamUrl = "https://gitlab.com/simple-nixos-mailserver/nixos-mailserver.git";
   };
 
   nix = mkFork {
     directory = "nix";
-    upstreamRemote = "origin";
     upstreamBranch = "master";
+    upstreamUrl = "https://github.com/nixOS/nix";
   };
 
   nixos-anywhere = mkFork {
     directory = "nixos-anywhere";
-    upstreamRemote = "upstream";
     upstreamBranch = "main";
+    upstreamUrl = "https://github.com/nix-community/nixos-anywhere";
   };
 
   nixpkgs = mkFork {
     directory = "nixpkgs";
-    upstreamRemote = "origin";
     upstreamBranch = "master";
+    upstreamUrl = "https://github.com/nixos/nixpkgs";
   };
 
   sops = mkFork {
     directory = "sops-nix";
-    upstreamRemote = "origin";
     upstreamBranch = "master";
+    upstreamUrl = "https://github.com/mic92/sops-nix";
   };
 
   xlibre = mkFork {
     directory = "xlibre";
-    upstreamRemote = "origin";
     upstreamBranch = "main";
+    upstreamUrl = "https://codeberg.org/takagemacoed/xlibre-overlay";
   };
 }

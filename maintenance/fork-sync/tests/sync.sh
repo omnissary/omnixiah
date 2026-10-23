@@ -29,9 +29,8 @@ git -C "$work" config user.email fork-sync@example.invalid
 printf 'base\n' >"$work/base"
 git -C "$work" add base
 git -C "$work" commit -m base
-git -C "$work" remote add upstream "$upstream"
 git -C "$work" remote add tatikoma "$destination"
-git -C "$work" push upstream main
+git -C "$work" push "$upstream" main
 
 git -C "$work" switch -c omnixiah
 printf 'fork\n' >"$work/fork"
@@ -43,7 +42,7 @@ git -C "$work" switch main
 printf 'upstream one\n' >"$work/upstream-one"
 git -C "$work" add upstream-one
 git -C "$work" commit -m 'add upstream change'
-git -C "$work" push upstream main
+git -C "$work" push "$upstream" main
 git -C "$work" switch omnixiah
 
 printf '%s\n' \
@@ -52,6 +51,7 @@ printf '%s\n' \
 
 jq -n \
   --arg update "$update" \
+  --arg upstream "$upstream" \
   '{
     demo: {
       name: "demo",
@@ -59,7 +59,8 @@ jq -n \
       branch: "omnixiah",
       upstream: {
         remote: "upstream",
-        branch: "main"
+        branch: "main",
+        url: $upstream
       },
       destination: {
         remote: "tatikoma",
@@ -144,9 +145,8 @@ git -C "$conflict_work" config user.email fork-sync@example.invalid
 printf 'base\n' >"$conflict_work/shared"
 git -C "$conflict_work" add shared
 git -C "$conflict_work" commit -m base
-git -C "$conflict_work" remote add upstream "$conflict_upstream"
 git -C "$conflict_work" remote add tatikoma "$conflict_destination"
-git -C "$conflict_work" push upstream main
+git -C "$conflict_work" push "$conflict_upstream" main
 
 git -C "$conflict_work" switch -c omnixiah
 printf 'fork\n' >"$conflict_work/shared"
@@ -157,10 +157,11 @@ conflict_old_head=$(git -C "$conflict_work" rev-parse HEAD)
 git -C "$conflict_work" switch main
 printf 'upstream\n' >"$conflict_work/shared"
 git -C "$conflict_work" commit -am 'change shared file upstream'
-git -C "$conflict_work" push upstream main
+git -C "$conflict_work" push "$conflict_upstream" main
 git -C "$conflict_work" switch omnixiah
 
 jq -n \
+  --arg upstream "$conflict_upstream" \
   '{
     conflict: {
       name: "conflict",
@@ -168,7 +169,8 @@ jq -n \
       branch: "omnixiah",
       upstream: {
         remote: "upstream",
-        branch: "main"
+        branch: "main",
+        url: $upstream
       },
       destination: {
         remote: "tatikoma",

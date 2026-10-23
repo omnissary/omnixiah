@@ -21,7 +21,7 @@ Recovery tags use this form:
 archive/omnixiah/2026-10-23-8070f3754ac8
 ```
 
-The registry is defined in `forks.nix` and validated by `config.nix`. Repository directories are resolved beneath the parent of the Omnixiah Git root, so sibling repositories are represented as `directory = "nixpkgs"` without path traversal. Update policies are:
+The registry is defined in `forks.nix` and validated by `config.nix`. Repository directories are resolved beneath the parent of the Omnixiah Git root, so sibling repositories are represented as `directory = "nixpkgs"` without path traversal. Every source repository uses the `upstream` remote. Its configured URL creates the remote when missing and rejects an existing remote with an unexpected URL. Update policies are:
 
 - `requested`: run the update only when `--update` is supplied.
 - `always`: run the update after every rebase.

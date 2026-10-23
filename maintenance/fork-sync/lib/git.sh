@@ -34,6 +34,26 @@ require_branch() {
   fi
 }
 
+ensure_remote() {
+  local path=$1
+  local remote=$2
+  local expected_url=$3
+  local actual_url
+
+  if actual_url=$(git_in "$path" remote get-url "$remote" 2>/dev/null); then
+    if [[ -n $expected_url && $actual_url != "$expected_url" ]]; then
+      printf 'fork-sync: remote %s in %s uses %s, expected %s\n' \
+        "$remote" "$path" "$actual_url" "$expected_url" >&2
+      return 1
+    fi
+  elif [[ -n $expected_url ]]; then
+    git_in "$path" remote add "$remote" "$expected_url"
+  else
+    printf 'fork-sync: missing remote %s in %s and no URL is configured\n' "$remote" "$path" >&2
+    return 1
+  fi
+}
+
 fetch_remotes() {
   local path=$1
   local upstream_remote=$2
@@ -50,6 +70,19 @@ remote_ref() {
   local branch=$2
 
   printf 'refs/remotes/%s/%s\n' "$remote" "$branch"
+}
+
+require_remote_branch() {
+  local path=$1
+  local remote=$2
+  local branch=$3
+  local ref
+
+  ref=$(remote_ref "$remote" "$branch")
+  if ! git_in "$path" show-ref --verify --quiet "$ref"; then
+    printf 'fork-sync: %s does not provide branch %s after fetching\n' "$remote" "$branch" >&2
+    return 1
+  fi
 }
 
 has_managed_updates() {
