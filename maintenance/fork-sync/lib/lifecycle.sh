@@ -263,6 +263,8 @@ push_fork() {
   local name=$1
   local file state stage path branch destination_remote destination_branch expected_oid actual_oid ready_head tag
 
+  printf 'fork-sync: pushing %s\n' "$name"
+
   require_state "$name"
   file=$(state_file "$name")
   state=$(<"$file")
