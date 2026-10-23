@@ -43,6 +43,24 @@
         "type": "github"
       }
     },
+    "disko_2": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792526520,
+        "narHash": "sha256-3hSJlv8mUVnZPMWK2+CM7a9O+nR6Z4mCh27NfLCmTPc=",
+        "rev": "cedd626e11b635470fa6f9fdb8ad79b0075dd7f9",
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/disko/archive/cedd626e11b635470fa6f9fdb8ad79b0075dd7f9.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/disko/archive/omnixiah.tar.gz"
+      }
+    },
     "fetchurl-sources": {
       "flake": false,
       "locked": {
@@ -197,6 +215,24 @@
         "owner": "cachix",
         "repo": "git-hooks.nix",
         "type": "github"
+      }
+    },
+    "home-manager": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792668857,
+        "narHash": "sha256-chUrnAqBhBLvXBUsLFxFYBIl8c0GWp06wdjmAMS8l+U=",
+        "rev": "cb7de2c7e589afe7531d4832c71ad4df144624ea",
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/home-manager/archive/cb7de2c7e589afe7531d4832c71ad4df144624ea.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/home-manager/archive/omnixiah.tar.gz"
       }
     },
     "microvm": {
@@ -408,7 +444,9 @@
     "root": {
       "inputs": {
         "deploy": "deploy",
+        "disko": "disko_2",
         "flake-parts": "flake-parts_3",
+        "home-manager": "home-manager",
         "microvm": "microvm",
         "nix": "nix",
         "nixpkgs": "nixpkgs_2",

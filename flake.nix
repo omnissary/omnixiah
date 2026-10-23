@@ -20,6 +20,16 @@
     };
     nix.url = "tarball+https://git.tatikoma.dev/omnixiah/nix/archive/omnixiah.tar.gz";
 
+    disko = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/disko/archive/omnixiah.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    home-manager = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/home-manager/archive/omnixiah.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     deploy = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -71,7 +81,13 @@
       profiles = {
         base = {
           description = "Shared defaults for all Omnixiah systems";
-          module = ./profiles/base.nix;
+          module = {
+            imports = [
+              inputs.disko.nixosModules.default
+              inputs.home-manager.nixosModules.default
+              ./profiles/base.nix
+            ];
+          };
         };
         microvm = {
           description = "Insecure login defaults for disposable local MicroVMs";

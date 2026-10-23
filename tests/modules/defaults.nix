@@ -11,24 +11,26 @@ let
   inherit (lib)
     concatStringsSep
     elem
+    hasAttrByPath
     hasInfix
     nixosSystem
     optionals
     ;
 
-  cfg =
-    (nixosSystem {
-      inherit system;
-      specialArgs = {
-        inherit self;
-      };
-      modules = [
-        self.profiles.base.module
-        {
-          networking.hostName = "defaults";
-        }
-      ];
-    }).config;
+  evaluated = nixosSystem {
+    inherit system;
+    specialArgs = {
+      inherit self;
+    };
+    modules = [
+      self.profiles.base.module
+      {
+        networking.hostName = "defaults";
+      }
+    ];
+  };
+  inherit (evaluated) config options;
+  cfg = config;
 
   experimentalFeatures = cfg.nix.settings.experimental-features;
   requiredExperimentalFeatures = [
@@ -40,7 +42,13 @@ let
   ) requiredExperimentalFeatures;
 
   errors =
-    optionals (!cfg.services.timesyncd.enable) [
+    optionals (!hasAttrByPath [ "disko" ] options) [
+      "Disko module is not imported"
+    ]
+    ++ optionals (!hasAttrByPath [ "home-manager" ] options) [
+      "Home Manager module is not imported"
+    ]
+    ++ optionals (!cfg.services.timesyncd.enable) [
       "services.timesyncd.enable is not true"
     ]
     ++
