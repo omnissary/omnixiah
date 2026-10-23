@@ -1,6 +1,7 @@
 _self: super: {
   golangci-lint-analyzers = super.buildGoModule {
-    name = "golangci-lint-analyzers";
+    pname = "golangci-lint-analyzers";
+    version = "0-unstable-2025-08-01";
 
     src = super.fetchFromGitea {
       domain = "git.tatikoma.dev";
@@ -16,5 +17,13 @@ _self: super: {
     ];
     subPackages = [ "cmd/exhaustive" ];
     doCheck = false;
+
+    passthru.updateScript = super.nix-update-script {
+      extraArgs = [
+        "--flake"
+        "--version=branch"
+        "--version-regex=(0-unstable-.*)"
+      ];
+    };
   };
 }

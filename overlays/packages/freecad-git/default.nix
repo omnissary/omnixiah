@@ -21,7 +21,7 @@ let
 in
 {
   freecad-git = super.freecad.overrideAttrs (oldAttrs: {
-    version = "26.3.0";
+    version = "0-unstable-2026-07-31";
 
     src = fetchFromGitHub {
       owner = "FreeCAD";
@@ -74,5 +74,15 @@ in
           --run 'export LADYBUG_TOOLS_FOLDER="''${XDG_DATA_HOME:-$HOME/.local/share}/ladybug_tools"'
       done
     '';
+
+    passthru = (oldAttrs.passthru or { }) // {
+      updateScript = self.nix-update-script {
+        extraArgs = [
+          "--flake"
+          "--version=branch"
+          "--version-regex=(0-unstable-.*)"
+        ];
+      };
+    };
   });
 }

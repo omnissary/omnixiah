@@ -6,12 +6,14 @@ final: _prev: {
       lib,
       makeWrapper,
       nix,
+      nix-update-script,
       python3,
       stdenvNoCC,
     }:
 
     stdenvNoCC.mkDerivation {
-      name = "nix-cage";
+      pname = "nix-cage";
+      version = "0-unstable-2026-06-02";
       src = fetchFromGitea {
         domain = "git.tatikoma.dev";
         owner = "corpix";
@@ -40,6 +42,14 @@ final: _prev: {
 
           runHook postInstall
       '';
+
+      passthru.updateScript = nix-update-script {
+        extraArgs = [
+          "--flake"
+          "--version=branch"
+          "--version-regex=(0-unstable-.*)"
+        ];
+      };
 
       meta = {
         homepage = "https://github.com/corpix/nix-cage";
