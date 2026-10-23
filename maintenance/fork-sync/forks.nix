@@ -50,6 +50,20 @@ in
     directory = "authentik";
     upstreamBranch = "main";
     upstreamUrl = "https://github.com/nix-community/authentik-nix";
+    checks = [
+      [
+        "nix"
+        "eval"
+        "--raw"
+        ".#packages.x86_64-linux.gopkgs.drvPath"
+      ]
+      [
+        "nix"
+        "eval"
+        "--raw"
+        ".#checks.x86_64-linux.default.name"
+      ]
+    ];
   };
 
   disko = mkFork {
