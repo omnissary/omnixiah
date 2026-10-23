@@ -87,6 +87,11 @@ grep -q '^fork-sync: preparing demo$' <<<"$prepare_output"
 git -C "$work" merge-base --is-ancestor refs/remotes/upstream/main HEAD
 git -C "$work" log -1 --format=%B | grep -q '^Omnixiah-Managed-Update: command$'
 
+prepared_head=$(git -C "$work" rev-parse HEAD)
+prepare_all_output=$(run_sync prepare-all --update)
+grep -q '^fork-sync: demo is already ready; skipping$' <<<"$prepare_all_output"
+[[ $(git -C "$work" rev-parse HEAD) == "$prepared_head" ]]
+
 tag=$(jq -r '.tag' "$state/omnixiah/fork-sync/demo.json")
 run_sync push demo
 [[ $(git --git-dir="$destination" rev-parse refs/heads/omnixiah) == $(git -C "$work" rev-parse HEAD) ]]

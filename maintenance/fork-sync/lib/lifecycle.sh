@@ -129,13 +129,18 @@ finalize_fork() {
 prepare_fork() {
   local name=$1
   local update_requested=$2
-  local file repo_config path branch upstream_remote upstream_branch destination_remote destination_branch
+  local file stage repo_config path branch upstream_remote upstream_branch destination_remote destination_branch
   local upstream_url destination_url upstream_ref old_head remote_oid tag tag_created update_ran=false status
 
   printf 'fork-sync: preparing %s\n' "$name"
 
   file=$(state_file "$name")
   if [[ -e $file ]]; then
+    stage=$(jq -r '.stage' "$file")
+    if [[ $stage == ready ]]; then
+      printf 'fork-sync: %s is already ready; skipping\n' "$name"
+      return 0
+    fi
     printf 'fork-sync: synchronization already active for %s\n' "$name" >&2
     return 1
   fi
