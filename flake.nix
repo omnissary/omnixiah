@@ -46,7 +46,7 @@
       inputs.nixos-anywhere.url = "tarball+https://git.tatikoma.dev/omnixiah/nixos-anywhere/archive/835e722926f784a07383e949c093c2339e5a7438.tar.gz";
     };
 
-    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-parts.url = "tarball+https://git.tatikoma.dev/omnixiah/flake-parts/archive/omnixiah.tar.gz";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
 
     systems.url = "github:nix-systems/default";
