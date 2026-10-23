@@ -70,6 +70,22 @@ in
     directory = "disko";
     upstreamBranch = "master";
     upstreamUrl = "https://github.com/nix-community/disko";
+    checks = [
+      [
+        "nix"
+        "eval"
+        "--raw"
+        ".#checks.x86_64-linux.disko-install.name"
+      ]
+      [
+        "nix"
+        "eval"
+        "--json"
+        ".#nixosModules"
+        "--apply"
+        "builtins.attrNames"
+      ]
+    ];
   };
 
   flake-parts = mkFork {
