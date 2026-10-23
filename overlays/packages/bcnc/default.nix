@@ -16,6 +16,8 @@ final: _prev: {
         numpy
         opencv-python
         pillow
+        pyglm
+        pyopengl
         pyserial
         scipy
         setuptools
@@ -44,19 +46,14 @@ final: _prev: {
     in
     buildPythonApplication rec {
       pname = "bCNC";
-      version = "5aab96b12f9f96794abfc47af661ba5fc7767d4b";
+      version = "2dc769ee801a00e33418ed6c0b707d9c9ce83d76";
 
       src = fetchFromGitHub {
         owner = "vlachoudis";
         repo = "bCNC";
         rev = version;
-        hash = "sha256-OqwwTphZlCM4NLDh8vGEgjLw+c76UscDp0r8C5kEOrw=";
+        hash = "sha256-p1hydSQjL0Di1WKf1CLqgz+nNZ5RhtHcVR77rikmC64=";
       };
-
-      prePatch = ''
-        substituteInPlace setup.py \
-          --replace-fail "opencv-python==4.5.5.64" "opencv-python>=4.5.5.64"
-      '';
 
       pyproject = true;
       build-system = [
@@ -72,6 +69,8 @@ final: _prev: {
         svgelements
         shxparser
         pillow
+        pyglm
+        pyopengl
         tkinter-gl
         opencv-python
         scipy
