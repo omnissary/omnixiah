@@ -79,6 +79,8 @@ fi
 [[ $(jq -r '.stage' "$state/omnixiah/package-update/demo.json") == update-failed ]]
 [[ $(<"$repository/version") == 1 ]]
 
+jq '.stage = "updating"' "$state/omnixiah/package-update/demo.json" >"$test_root/interrupted.json"
+mv "$test_root/interrupted.json" "$state/omnixiah/package-update/demo.json"
 touch "$allow"
 run_update continue demo
 [[ $(<"$repository/version") == 2 ]]

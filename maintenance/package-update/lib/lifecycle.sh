@@ -214,7 +214,7 @@ continue_update() {
   config=$(package_config "$name")
 
   case $stage in
-    update-failed)
+    updating | update-failed)
       set_state_stage "$name" updating
       if ! run_update_script "$worktree" "$config"; then
         set_state_stage "$name" update-failed
