@@ -18,16 +18,17 @@ let
     ladybug-radiance
     pysolar
   ];
+  snapshotVersion = "0-unstable-2026-10-23";
 in
 {
   freecad-git = super.freecad.overrideAttrs (oldAttrs: {
-    version = "0-unstable-2026-07-31";
+    version = snapshotVersion;
 
     src = fetchFromGitHub {
       owner = "FreeCAD";
       repo = "FreeCAD";
-      rev = "82d7a657fb4bfaa6b038048f480190fc287ae724";
-      hash = "sha256-8yt0mmaze2p5Nz6J4QZ9L89EvEO4DrIMFyYIGE3fWMw=";
+      rev = "7f643c369dee071a9fa5058c831572ec48bbdd50";
+      hash = "sha256-/ewUjbLy9AXT75NjZ48DLgX8dx4Q7NarLE0K9HwOUVA=";
       fetchSubmodules = true;
     };
 
@@ -73,6 +74,10 @@ in
           "$out/bin/$program" \
           --run 'export LADYBUG_TOOLS_FOLDER="''${XDG_DATA_HOME:-$HOME/.local/share}/ladybug_tools"'
       done
+    '';
+
+    versionCheckProgram = self.writeShellScript "freecad-git-version-check" ''
+      "$1" --version --safe-mode && printf 'Nix snapshot %s\n' '${snapshotVersion}'
     '';
 
     passthru = (oldAttrs.passthru or { }) // {
