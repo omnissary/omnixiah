@@ -6,12 +6,13 @@ pkgs.runCommand "omnixiah-fork-sync-test"
       pkgs.coreutils
       pkgs.git
       pkgs.jq
+      pkgs.util-linux
     ];
   }
   ''
-    cp -R ${../.} source
+    cp -R ${../..} source
     chmod -R u+w source
     patchShebangs source
-    source/tests/sync.sh source/sync
+    source/fork-sync/tests/sync.sh source/fork-sync/sync
     touch $out
   ''

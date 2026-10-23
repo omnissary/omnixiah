@@ -3,6 +3,8 @@
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+maintenance_dir=$(dirname "$script_dir")
+maintenance_name=fork-sync
 config_file="$script_dir/config.nix"
 state_root="${XDG_STATE_HOME:-${HOME}/.local/state}/omnixiah/fork-sync"
 if [[ -n ${FORK_SYNC_WORKSPACE_ROOT:-} ]]; then
@@ -12,6 +14,9 @@ else
   workspace_root=$(dirname "$repository_root")
 fi
 
+source "$maintenance_dir/lib/config.sh"
+source "$maintenance_dir/lib/git.sh"
+source "$maintenance_dir/lib/state.sh"
 source "$script_dir/lib/config.sh"
 source "$script_dir/lib/git.sh"
 source "$script_dir/lib/updates.sh"
@@ -37,7 +42,7 @@ if [[ ${1:-} == --config ]]; then
   shift 2
 fi
 
-load_config "$config_file"
+load_config "$config_file" FORK_SYNC_CONFIG_JSON
 
 command=${1:-}
 case $command in

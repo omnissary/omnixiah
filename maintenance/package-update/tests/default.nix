@@ -10,6 +10,9 @@ pkgs.runCommand "omnixiah-package-update-test"
   ''
     export HOME="$TMPDIR/home"
     mkdir -p "$HOME"
-    ${pkgs.bash}/bin/bash ${./update.sh} ${../.}/update
+    cp -R ${../..} source
+    chmod -R u+w source
+    patchShebangs source
+    source/package-update/tests/update.sh source/package-update/update
     touch $out
   ''

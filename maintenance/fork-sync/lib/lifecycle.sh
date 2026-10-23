@@ -3,11 +3,6 @@
 state_root=${state_root:?}
 script_dir=${script_dir:?}
 
-state_file() {
-  local name=$1
-  printf '%s/%s.json\n' "$state_root" "$name"
-}
-
 require_state() {
   local name=$1
   local file
@@ -17,20 +12,6 @@ require_state() {
     printf 'fork-sync: no active synchronization for %s\n' "$name" >&2
     return 1
   fi
-}
-
-set_state_stage() {
-  local name=$1
-  local stage=$2
-  local ready_head=${3:-}
-  local file temporary
-
-  file=$(state_file "$name")
-  temporary=$(mktemp "$state_root/.state.XXXXXX")
-  jq --arg stage "$stage" --arg readyHead "$ready_head" \
-    '.stage = $stage | if $readyHead == "" then . else .readyHead = $readyHead end' \
-    "$file" >"$temporary"
-  mv "$temporary" "$file"
 }
 
 create_state() {

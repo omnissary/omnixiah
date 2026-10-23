@@ -1,39 +1,5 @@
 #!/usr/bin/env bash
 
-git_in() {
-  local path=$1
-  shift
-  git -C "$path" "$@"
-}
-
-require_repository() {
-  local path=$1
-
-  [[ -d $path ]]
-  git_in "$path" rev-parse --git-dir >/dev/null
-}
-
-require_clean_repository() {
-  local path=$1
-
-  if [[ -n $(git_in "$path" status --porcelain) ]]; then
-    printf 'fork-sync: repository is dirty: %s\n' "$path" >&2
-    return 1
-  fi
-}
-
-require_branch() {
-  local path=$1
-  local expected=$2
-  local actual
-
-  actual=$(git_in "$path" branch --show-current)
-  if [[ $actual != "$expected" ]]; then
-    printf 'fork-sync: expected branch %s, found %s in %s\n' "$expected" "${actual:-detached HEAD}" "$path" >&2
-    return 1
-  fi
-}
-
 ensure_remote() {
   local path=$1
   local remote=$2

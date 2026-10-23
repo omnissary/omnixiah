@@ -136,7 +136,7 @@ if run_sync prepare demo; then
   exit 1
 fi
 
-run_sync status | grep -q $'demo\tomnixiah\t.*\tdirty\tidle'
+run_sync status | grep -Eq 'demo +omnixiah +.* +dirty +idle'
 
 conflict_upstream="$test_root/conflict-upstream.git"
 conflict_destination="$test_root/conflict-destination.git"

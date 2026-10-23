@@ -5,22 +5,6 @@ repository_root=${repository_root:?}
 script_dir=${script_dir:?}
 system=${system:?}
 
-state_file() {
-  local name=$1
-  printf '%s/%s.json\n' "$state_root" "$name"
-}
-
-set_stage() {
-  local name=$1
-  local stage=$2
-  local file temporary
-
-  file=$(state_file "$name")
-  temporary=$(mktemp "$state_root/.state.XXXXXX")
-  jq --arg stage "$stage" '.stage = $stage' "$file" >"$temporary"
-  mv "$temporary" "$file"
-}
-
 create_state() {
   local name=$1
   local attr_path=$2
@@ -129,9 +113,9 @@ finalize_update() {
   worktree=$(jq -r '.worktree' <<<"$state")
   branch=$(jq -r '.branch' <<<"$state")
 
-  set_stage "$name" formatting
+  set_state_stage "$name" formatting
   if ! run_commands "$worktree" "$config" format; then
-    set_stage "$name" validation-failed
+    set_state_stage "$name" validation-failed
     return 1
   fi
 
@@ -141,20 +125,20 @@ finalize_update() {
     return 0
   fi
 
-  set_stage "$name" validating
+  set_state_stage "$name" validating
   if [[ $(jq '.build | length' <<<"$config") -eq 0 ]]; then
     if ! (cd "$worktree" && nix build --no-link --show-trace ".#pkgs.${system}.${attr_path}"); then
-      set_stage "$name" validation-failed
+      set_state_stage "$name" validation-failed
       printf 'package-update: validation failed for %s; fix it and run update-continue %s\n' "$name" "$name" >&2
       return 1
     fi
   elif ! run_commands "$worktree" "$config" build; then
-    set_stage "$name" validation-failed
+    set_state_stage "$name" validation-failed
     printf 'package-update: validation failed for %s; fix it and run update-continue %s\n' "$name" "$name" >&2
     return 1
   fi
   if ! run_commands "$worktree" "$config" checks; then
-    set_stage "$name" validation-failed
+    set_state_stage "$name" validation-failed
     printf 'package-update: validation failed for %s; fix it and run update-continue %s\n' "$name" "$name" >&2
     return 1
   fi
@@ -171,7 +155,7 @@ finalize_update() {
 
   require_clean_repository "$repository_root"
   if [[ $(git_in "$repository_root" rev-parse HEAD) != "$old_head" ]]; then
-    set_stage "$name" integration-failed
+    set_state_stage "$name" integration-failed
     printf 'package-update: repository moved while updating %s\n' "$name" >&2
     return 1
   fi
@@ -207,7 +191,7 @@ prepare_update() {
   create_state "$name" "$attr_path" "$old_head" "$old_version" "$branch" "$worktree"
 
   if ! run_update_script "$worktree" "$config"; then
-    set_stage "$name" update-failed
+    set_state_stage "$name" update-failed
     printf 'package-update: updater failed for %s; fix it and run update-continue %s\n' "$name" "$name" >&2
     return 1
   fi
@@ -231,9 +215,9 @@ continue_update() {
 
   case $stage in
     update-failed)
-      set_stage "$name" updating
+      set_state_stage "$name" updating
       if ! run_update_script "$worktree" "$config"; then
-        set_stage "$name" update-failed
+        set_state_stage "$name" update-failed
         return 1
       fi
       finalize_update "$name"
