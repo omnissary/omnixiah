@@ -196,6 +196,7 @@ fi
 
 printf 'resolved\n' >"$conflict_work/shared"
 git -C "$conflict_work" add shared
+GIT_EDITOR=true git -C "$conflict_work" rebase --continue
 run_sync continue conflict
 [[ $(jq -r '.stage' "$state/omnixiah/fork-sync/conflict.json") == ready ]]
 

@@ -85,6 +85,14 @@ require_remote_branch() {
   fi
 }
 
+rebase_in_progress() {
+  local path=$1
+  local git_dir
+
+  git_dir=$(git_in "$path" rev-parse --absolute-git-dir)
+  [[ -d $git_dir/rebase-merge || -d $git_dir/rebase-apply ]]
+}
+
 has_managed_updates() {
   local path=$1
   local upstream_ref=$2

@@ -195,18 +195,25 @@ prepare_fork() {
 
 continue_fork() {
   local name=$1
-  local file state stage path
+  local file state stage path old_head
 
   require_state "$name"
   file=$(state_file "$name")
   state=$(<"$file")
   stage=$(jq -r '.stage' <<<"$state")
   path=$(jq -r '.path' <<<"$state")
+  old_head=$(jq -r '.oldHead' <<<"$state")
 
   case $stage in
     rebase-conflict)
-      if ! GIT_EDITOR=true git_in "$path" rebase --continue; then
-        printf 'fork-sync: rebase still requires attention for %s\n' "$name" >&2
+      if rebase_in_progress "$path"; then
+        if ! GIT_EDITOR=true git_in "$path" rebase --continue; then
+          printf 'fork-sync: rebase still requires attention for %s\n' "$name" >&2
+          return 1
+        fi
+      elif [[ $(git_in "$path" rev-parse HEAD) == "$old_head" ]]; then
+        printf 'fork-sync: rebase for %s was aborted outside fork-sync; run sync-abort %s\n' \
+          "$name" "$name" >&2
         return 1
       fi
       finalize_fork "$name"
@@ -236,7 +243,7 @@ abort_fork() {
   tag=$(jq -r '.tag' <<<"$state")
   tag_created=$(jq -r '.tagCreated' <<<"$state")
 
-  if [[ -d $(git_in "$path" rev-parse --git-path rebase-merge) || -d $(git_in "$path" rev-parse --git-path rebase-apply) ]]; then
+  if rebase_in_progress "$path"; then
     git_in "$path" rebase --abort
   fi
   git_in "$path" reset --hard "$old_head"
