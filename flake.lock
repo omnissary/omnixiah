@@ -2,18 +2,20 @@
   "nodes": {
     "deploy": {
       "inputs": {
-        "flake-parts": "flake-parts",
+        "flake-parts": [
+          "flake-parts"
+        ],
         "nixos-anywhere": "nixos-anywhere",
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1788748168,
-        "narHash": "sha256-2iVzdBA68x6YpHzVSCNpJOSY0vqgSvyijXJDXyTYWb0=",
-        "rev": "250c99994013d1f9b0e98755c833e3de9f562c82",
+        "lastModified": 1792756550,
+        "narHash": "sha256-hriKM33O+h98If4GybQqYwX9wGg4fAUVaSwJeZ1G49I=",
+        "rev": "48621f4f02a9c3c508393f6ca81bf4186091717a",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/250c99994013d1f9b0e98755c833e3de9f562c82.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/48621f4f02a9c3c508393f6ca81bf4186091717a.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -114,27 +116,6 @@
       "inputs": {
         "nixpkgs-lib": [
           "deploy",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1788450739,
-        "narHash": "sha256-glZLQlzIn1fXH6PazR2iUmTo7kzzyYSshrWhLS9TqCU=",
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "rev": "31729ca8cbdb4fa927b34e5f4353e6a83f39e993",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "type": "github"
-      }
-    },
-    "flake-parts_2": {
-      "inputs": {
-        "nixpkgs-lib": [
-          "deploy",
           "nixos-anywhere",
           "nixpkgs"
         ]
@@ -153,7 +134,7 @@
         "type": "github"
       }
     },
-    "flake-parts_3": {
+    "flake-parts_2": {
       "inputs": {
         "nixpkgs-lib": [
           "nixpkgs"
@@ -171,7 +152,7 @@
         "url": "https://git.tatikoma.dev/omnixiah/flake-parts/archive/omnixiah.tar.gz"
       }
     },
-    "flake-parts_4": {
+    "flake-parts_3": {
       "inputs": {
         "nixpkgs-lib": [
           "nix",
@@ -192,7 +173,7 @@
         "type": "github"
       }
     },
-    "flake-parts_5": {
+    "flake-parts_4": {
       "inputs": {
         "nixpkgs-lib": "nixpkgs-lib"
       },
@@ -291,7 +272,7 @@
     "nix": {
       "inputs": {
         "flake-compat": "flake-compat",
-        "flake-parts": "flake-parts_4",
+        "flake-parts": "flake-parts_3",
         "git-hooks-nix": "git-hooks-nix",
         "nixpkgs": "nixpkgs",
         "nixpkgs-23-11": "nixpkgs-23-11",
@@ -335,7 +316,7 @@
     "nixos-anywhere": {
       "inputs": {
         "disko": "disko",
-        "flake-parts": "flake-parts_2",
+        "flake-parts": "flake-parts",
         "nix-vm-test": "nix-vm-test",
         "nixos-images": "nixos-images",
         "nixos-stable": "nixos-stable",
@@ -478,7 +459,7 @@
         "deploy": "deploy",
         "disko": "disko_2",
         "dns": "dns",
-        "flake-parts": "flake-parts_3",
+        "flake-parts": "flake-parts_2",
         "home-manager": "home-manager",
         "microvm": "microvm",
         "nix": "nix",
@@ -597,7 +578,7 @@
     "xlibre": {
       "inputs": {
         "fetchurl-sources": "fetchurl-sources",
-        "flake-parts": "flake-parts_5",
+        "flake-parts": "flake-parts_4",
         "nixpkgs": [
           "nixpkgs"
         ],

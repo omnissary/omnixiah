@@ -43,6 +43,7 @@
     deploy = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
       inputs.nixos-anywhere.url = "tarball+https://git.tatikoma.dev/omnixiah/nixos-anywhere/archive/835e722926f784a07383e949c093c2339e5a7438.tar.gz";
     };
 
