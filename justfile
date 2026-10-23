@@ -4,6 +4,14 @@ set lazy := true
 nix_flags := "--accept-flake-config"
 system := `nix eval --raw --impure --expr builtins.currentSystem`
 
+ssh_control_dir := `dir="$(git rev-parse --show-toplevel)/.git/fork-sync-ssh"; mkdir -p "$dir"; printf '%s' "$dir"`
+ssh_control := "-o ControlMaster=auto -o ControlPath=" + ssh_control_dir + "/%r@%h:%p -o ControlPersist=1h"
+export GIT_SSH_COMMAND := "ssh " + ssh_control
+
+sync_host := "git.tatikoma.dev"
+sync_host_user := "gitea"
+sync_host_port := "2222"
+
 default:
   just profiles
 
@@ -41,6 +49,7 @@ sync repo *args:
 
 sync-all *args:
   maintenance/fork-sync/sync prepare-all {{args}}
+  ssh {{ssh_control}} -O exit -p {{sync_host_port}} {{sync_host_user}}@{{sync_host}} 2>/dev/null || true
 
 sync-continue repo:
   maintenance/fork-sync/sync continue {{repo}}
@@ -53,3 +62,4 @@ sync-push repo:
 
 sync-push-all:
   maintenance/fork-sync/sync push-all
+  ssh {{ssh_control}} -O exit -p {{sync_host_port}} {{sync_host_user}}@{{sync_host}} 2>/dev/null || true
