@@ -50,6 +50,10 @@
     flake-parts.url = "tarball+https://git.tatikoma.dev/omnixiah/flake-parts/archive/omnixiah.tar.gz";
     flake-parts.inputs.nixpkgs-lib.follows = "nixpkgs";
 
+    flake-utils = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/flake-utils/archive/omnixiah.tar.gz";
+      inputs.systems.follows = "systems";
+    };
     systems.url = "github:nix-systems/default";
 
     treefmt-nix = {
