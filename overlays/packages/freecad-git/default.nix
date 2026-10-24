@@ -1,7 +1,7 @@
 self: super:
 let
   inherit (self)
-    fetchFromGitHub
+    fetchFromGitea
     python3Packages
     ;
   inherit (self.lib)
@@ -24,9 +24,10 @@ in
   freecad-git = super.freecad.overrideAttrs (oldAttrs: {
     version = snapshotVersion;
 
-    src = fetchFromGitHub {
-      owner = "FreeCAD";
-      repo = "FreeCAD";
+    src = fetchFromGitea {
+      domain = "git.tatikoma.dev";
+      owner = "corpix";
+      repo = "freecad";
       rev = "7f643c369dee071a9fa5058c831572ec48bbdd50";
       hash = "sha256-/ewUjbLy9AXT75NjZ48DLgX8dx4Q7NarLE0K9HwOUVA=";
       fetchSubmodules = true;
