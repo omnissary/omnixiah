@@ -5,7 +5,6 @@ let
     python3Packages
     ;
   inherit (self.lib)
-    filter
     cmakeBool
     makeBinPath
     getLib
@@ -18,7 +17,7 @@ let
     ladybug-radiance
     pysolar
   ];
-  snapshotVersion = "0-unstable-2026-10-23";
+  snapshotVersion = "0-unstable-2026-10-24";
 in
 {
   freecad-git = super.freecad.overrideAttrs (oldAttrs: {
@@ -28,8 +27,8 @@ in
       domain = "git.tatikoma.dev";
       owner = "corpix";
       repo = "freecad";
-      rev = "7f643c369dee071a9fa5058c831572ec48bbdd50";
-      hash = "sha256-/ewUjbLy9AXT75NjZ48DLgX8dx4Q7NarLE0K9HwOUVA=";
+      rev = "08872b752f6177ee71205f54b8f2881e21223fe7";
+      hash = "sha256-n6HdizyKGOws9zhZzRi0WzDV2582pBlgSucsvVINUvI=";
       fetchSubmodules = true;
     };
 
@@ -51,13 +50,7 @@ in
       "--set COIN_GLU_LIBNAME ${getLib self.libGLU}/lib/libGLU.so.1"
     ];
 
-    patches = filter (
-      value:
-      let
-        name = baseNameOf value;
-      in
-      name == "0001-NIXOS-don-t-ignore-PYTHONPATH.patch"
-    ) oldAttrs.patches;
+    patches = [ ];
 
     postPatch = "";
 
