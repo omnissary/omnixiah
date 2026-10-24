@@ -5,15 +5,18 @@
   ...
 }:
 let
+  inherit (builtins)
+    isInt
+    isString
+    ;
+
   inherit (lib)
     types
     mkOption
-    mkEnableOption
     mkMerge
     mkIf
     mkAfter
     optionalString
-    stringLength
     attrNames
     listToAttrs
     mapAttrs'
@@ -63,16 +66,20 @@ let
     disableCookies = "disable-cookies";
   };
 
+  # A zero or empty knob is left out, so the kernel keeps its own default.
+  renderValue =
+    flag: value:
+    if isInt value && value > 0 then
+      " ${flag} ${toString value}"
+    else if isString value && value != "" then
+      " ${flag} ${escapeShellArg value}"
+    else
+      "";
+
   interfaceArguments =
     interface:
     concatStringsSep "" (
-      mapAttrsToList (
-        option: flag:
-        let
-          value = toString interface.${option};
-        in
-        optionalString (stringLength value > 0) " ${flag} ${escapeShellArg value}"
-      ) valueFlags
+      mapAttrsToList (option: flag: renderValue flag interface.${option}) valueFlags
       ++ mapAttrsToList (
         option: flag: " ${flag} ${if interface.${option} then "on" else "off"}"
       ) boolFlags
@@ -94,7 +101,6 @@ let
 in
 {
   options.networking.wireguard = {
-    amnezia.enable = mkEnableOption { };
     interfaces = mkOption {
       type = types.attrsOf (
         types.submodule (_: {
@@ -174,7 +180,7 @@ in
           ) interfaces
         );
     }
-    (mkIf cfg.amnezia.enable {
+    {
       systemd.services =
         let
           interfaceUnits = mapAttrs' (
@@ -205,6 +211,6 @@ in
           ) cfg.interfaces;
         in
         if config.networking.useNetworkd then networkdUnits else interfaceUnits;
-    })
+    }
   ]);
 }

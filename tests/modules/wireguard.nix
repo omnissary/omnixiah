@@ -41,7 +41,6 @@ let
         {
           networking.hostName = "wireguard";
           networking.wireguard.enable = true;
-          networking.wireguard.amnezia.enable = true;
           networking.wireguard.interfaces.wg0 = interface;
         }
         extra
@@ -67,10 +66,23 @@ let
     "header-protection-key /run/secrets/header-protection-key"
   ];
 
+  # Knobs left at zero or empty must not reach wg at all.
+  forbiddenFragments = [
+    "s3 0"
+    "s4 0"
+    "jmin 0"
+    "rekey-after-time"
+    "reject-after-time"
+    "keepalive-timeout"
+  ];
+
   missing = lib.filter (fragment: !(hasInfix fragment networkdScript)) requiredFragments;
+
+  present = lib.filter (fragment: hasInfix fragment networkdScript) forbiddenFragments;
 
   errors =
     map (fragment: "networkd unit is missing ${fragment}") missing
+    ++ map (fragment: "networkd unit should not carry ${fragment}") present
     ++ optionals (hasInfix "advanced-security" networkdScript) [
       "advanced-security is no longer a wg argument"
     ]
