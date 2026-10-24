@@ -6,6 +6,10 @@
 }:
 
 let
+  inherit (builtins)
+    filter
+    ;
+
   inherit (inputs.nixpkgs) lib;
   inherit (lib)
     concatStringsSep
@@ -76,9 +80,9 @@ let
     "keepalive-timeout"
   ];
 
-  missing = lib.filter (fragment: !(hasInfix fragment networkdScript)) requiredFragments;
+  missing = filter (fragment: !(hasInfix fragment networkdScript)) requiredFragments;
 
-  present = lib.filter (fragment: hasInfix fragment networkdScript) forbiddenFragments;
+  present = filter (fragment: hasInfix fragment networkdScript) forbiddenFragments;
 
   errors =
     map (fragment: "networkd unit is missing ${fragment}") missing
