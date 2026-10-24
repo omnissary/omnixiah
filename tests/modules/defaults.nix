@@ -88,7 +88,7 @@ let
     ++ optionals (cfg.systemd.settings.Manager.DefaultLimitCORE != "32M") [
       "systemd core limit default changed"
     ]
-    ++ optionals (!hasInfix "SystemMaxUse=256M" cfg.services.journald.extraConfig) [
+    ++ optionals (cfg.services.journald.settings.Journal.SystemMaxUse != "256M") [
       "journald size default changed"
     ];
 in

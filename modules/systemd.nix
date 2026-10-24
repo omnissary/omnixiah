@@ -10,7 +10,5 @@ in
     settings.Manager.DefaultLimitCORE = mkDefault "32M";
   };
 
-  services.journald.extraConfig = mkDefault ''
-    SystemMaxUse=256M
-  '';
+  services.journald.settings.Journal.SystemMaxUse = mkDefault "256M";
 }
