@@ -3,7 +3,6 @@ final: _prev: {
     {
       pkgs,
       fetchFromGitea,
-      lua ? pkgs.lua5_3,
       nix-update-script,
       ...
     }:
@@ -48,6 +47,7 @@ final: _prev: {
         xcbutilxrm
         xmlto
         ;
+      lua = pkgs.lua5_3;
       rev = "0f4b74f70c7da8dbb536865850e44d17f179b4b5";
       luaEnv = lua.withPackages (ps: [
         ps.lgi
@@ -61,12 +61,12 @@ final: _prev: {
         owner = "corpix";
         repo = "awesomewm";
         inherit rev;
-        hash = "sha256-Wb317l8NpTSi0je66o6XV+jaObmv+Sm+qck0oBKbVYI=";
+        hash = "sha256-rW0WVkxU+WK1pKAyZxW7i7cWCPAN99tTHwY3rhpq4CE=";
       };
     in
     stdenv.mkDerivation rec {
       pname = "awesome";
-      version = "0-unstable-1970-01-01";
+      version = "0-unstable-2026-08-10";
 
       inherit src;
 
