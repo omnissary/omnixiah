@@ -6,13 +6,10 @@
 }:
 
 let
-  inherit (builtins)
-    filter
-    ;
-
   inherit (inputs.nixpkgs) lib;
   inherit (lib)
     concatStringsSep
+    filter
     hasInfix
     nixosSystem
     optionals
