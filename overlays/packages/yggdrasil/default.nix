@@ -1,13 +1,13 @@
 _self: super: {
   yggdrasil = super.yggdrasil.overrideAttrs (oldAttrs: {
-    version = "0-unstable-1970-01-01";
+    version = "0-unstable-2026-10-19";
 
     src = super.fetchFromGitea {
       domain = "git.tatikoma.dev";
       owner = "corpix";
       repo = "yggdrasil-go";
-      rev = "72e7e11015496570c8ef985c8615424dccd230e3";
-      hash = "sha256-v0u1giw9Widdsxm+58+WE/iKtSBdaVrVHeeYZSYm2bI=";
+      rev = "290efc1101a47b1128549730ac7ec609b3603d66";
+      hash = "sha256-ykI1lRjt39+ty6OfDFT3vb3THmcG7F9ZTxqIIYr5cPY=";
     };
     vendorHash = null;
 
