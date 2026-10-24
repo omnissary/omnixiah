@@ -127,12 +127,15 @@ in
             maxHandshakeAttempts = valueOption "Overrides MAX_TIMER_HANDSHAKES, ${rangeDescription}" "";
 
             headerProtectionKeyFile = mkOption {
-              type = types.nullOr types.path;
+              type = types.nullOr types.str;
               default = null;
+              example = "/private/header_protection_key";
               description = ''
-                Path to a file holding the base64 header protection key. Every
+                Path to a file holding the base64 header protection key. A
+                string rather than a path, so the key is read at runtime
+                instead of being copied into the world readable store. Every
                 s1-s4 must be at least 12 so each padding can carry the
-                per-packet nonce. The same key must be set on every peer.
+                per-packet nonce, and the same key must be set on every peer.
               '';
             };
 
