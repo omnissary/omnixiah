@@ -27,6 +27,7 @@ in
     ../modules/tc.nix
     ../modules/timesync.nix
     ../modules/update-diff.nix
+    ../modules/wireguard.nix
   ];
 
   system.stateVersion = mkDefault "25.11";

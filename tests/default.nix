@@ -40,4 +40,12 @@ in
   tc = import ./modules/tc.nix {
     inherit self testing;
   };
+  wireguard = import ./modules/wireguard.nix {
+    inherit
+      inputs
+      pkgs
+      self
+      system
+      ;
+  };
 }

@@ -231,6 +231,7 @@
           tc = ./modules/tc.nix;
           timesync = ./modules/timesync.nix;
           update-diff = ./modules/update-diff.nix;
+          wireguard = ./modules/wireguard.nix;
         };
 
         nixosConfigurations = mapAttrs (
