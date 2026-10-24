@@ -1,9 +1,12 @@
 self: super: {
   doublecmd = super.doublecmd.overrideAttrs (oldAttrs: {
-    version = "cfaadc34";
+    version = "0-unstable-1970-01-01";
 
-    src = super.fetchurl {
-      url = "https://git.tatikoma.dev/corpix/doublecmd/archive/cfaadc346f5f1042369fcf9b983c503f3356b402.tar.gz";
+    src = super.fetchFromGitea {
+      domain = "git.tatikoma.dev";
+      owner = "corpix";
+      repo = "doublecmd";
+      rev = "cfaadc346f5f1042369fcf9b983c503f3356b402";
       hash = "sha256-RzZzFGuOqK9xWu1Z+ooUiedEI5iT5TsXzyrRINwlSpk=";
     };
 
@@ -66,5 +69,15 @@ self: super: {
           --prefix LD_LIBRARY_PATH : ${super.lib.makeLibraryPath [ self.unrar ]}
         )
       '';
+
+    passthru = (oldAttrs.passthru or { }) // {
+      updateScript = super.nix-update-script {
+        extraArgs = [
+          "--flake"
+          "--version=branch"
+          "--version-regex=v?(.*-unstable-.*)"
+        ];
+      };
+    };
   });
 }

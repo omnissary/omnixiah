@@ -2,8 +2,9 @@ final: _prev: {
   awesome-git = final.callPackage (
     {
       pkgs,
-      fetchurl,
+      fetchFromGitea,
       lua ? pkgs.lua5_3,
+      nix-update-script,
       ...
     }:
     let
@@ -55,14 +56,17 @@ final: _prev: {
         ps.luafilesystem
         ps.http
       ]);
-      src = fetchurl {
-        url = "https://git.tatikoma.dev/corpix/awesomewm/archive/${rev}.tar.gz";
+      src = fetchFromGitea {
+        domain = "git.tatikoma.dev";
+        owner = "corpix";
+        repo = "awesomewm";
+        inherit rev;
         hash = "sha256-Wb317l8NpTSi0je66o6XV+jaObmv+Sm+qck0oBKbVYI=";
       };
     in
     stdenv.mkDerivation rec {
       pname = "awesome";
-      version = "git-${builtins.substring 0 7 rev}";
+      version = "0-unstable-1970-01-01";
 
       inherit src;
 
@@ -135,6 +139,14 @@ final: _prev: {
         wrapProgram $out/bin/awesome-client \
           --prefix PATH : "${which}/bin"
       '';
+
+      passthru.updateScript = nix-update-script {
+        extraArgs = [
+          "--flake"
+          "--version=branch"
+          "--version-regex=v?(.*-unstable-.*)"
+        ];
+      };
     }
   ) { };
 }
