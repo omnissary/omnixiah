@@ -1,13 +1,13 @@
 self: super: {
   doublecmd = super.doublecmd.overrideAttrs (oldAttrs: {
-    version = "0-unstable-2026-06-26";
+    version = "0-unstable-2026-10-24";
 
     src = super.fetchFromGitea {
       domain = "git.tatikoma.dev";
       owner = "corpix";
       repo = "doublecmd";
-      rev = "c018d2a9a96ead7f55ef27818f57479315128b7c";
-      hash = "sha256-//f1yqoph2b+RSCQb3f9FQkwzltm1D4mpjP2tGyaKH4=";
+      rev = "a780d744ea01a6721f8da3d1991ce99d53a26e08";
+      hash = "sha256-FUtaD5GkBWf9VibPvDFl9HIXziplb2t4DO40+cWe0VY=";
     };
 
     postPatch = (oldAttrs.postPatch or "") + ''
