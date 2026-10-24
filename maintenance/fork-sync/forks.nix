@@ -112,6 +112,12 @@ in
     ];
   };
 
+  flake-utils = mkFork {
+    directory = "flake-utils";
+    upstreamBranch = "main";
+    upstreamUrl = "https://github.com/numtide/flake-utils";
+  };
+
   home-manager = mkFork {
     directory = "home-manager";
     upstreamBranch = "master";
