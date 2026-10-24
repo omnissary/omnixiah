@@ -170,6 +170,24 @@
         "type": "github"
       }
     },
+    "flake-utils_2": {
+      "inputs": {
+        "systems": [
+          "systems"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791914995,
+        "narHash": "sha256-Zf/xfQEAasnwnmEfHqW/4hjDE/s44yn2hD4RuVIZRjA=",
+        "rev": "b7a79d3fea1e214f6d668d521cecec0c01e26544",
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/flake-utils/archive/b7a79d3fea1e214f6d668d521cecec0c01e26544.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/flake-utils/archive/omnixiah.tar.gz"
+      }
+    },
     "git-hooks-nix": {
       "inputs": {
         "flake-compat": [
@@ -427,6 +445,7 @@
         "disko": "disko_2",
         "dns": "dns",
         "flake-parts": "flake-parts",
+        "flake-utils": "flake-utils_2",
         "home-manager": "home-manager",
         "microvm": "microvm",
         "nix": "nix",
