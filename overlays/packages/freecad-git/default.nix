@@ -27,8 +27,8 @@ in
       domain = "git.tatikoma.dev";
       owner = "corpix";
       repo = "freecad";
-      rev = "08872b752f6177ee71205f54b8f2881e21223fe7";
-      hash = "sha256-n6HdizyKGOws9zhZzRi0WzDV2582pBlgSucsvVINUvI=";
+      rev = "d148da350bd4c361f2117ccdc0a124625e57407d";
+      hash = "sha256-XPVlC2hsee16ftjS+maLoC20YgKzw0zDPYn0ZWjYuk8=";
       fetchSubmodules = true;
     };
 
