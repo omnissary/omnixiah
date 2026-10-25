@@ -4,8 +4,6 @@ let
     package:
     package.overrideAttrs (old: {
       preInstallCheck = (old.preInstallCheck or "") + ''
-        # These tests make assumptions about NFC/NFD pathname handling which
-        # do not hold on ZFS datasets with Unicode normalization enabled.
         disable_test t0050-filesystem
         disable_test t7527-builtin-fsmonitor 'Unicode nfc'
       '';
