@@ -29,6 +29,11 @@ _self: super: {
         url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/91965661b8347e2f64080a5f3d33caff8e072eac.patch";
         hash = "sha256-La1b4DsLS+xT1hP1DoDn5ZOqjh/sA+EGHrdw+IOdAhc=";
       })
+      # awg3 creating namespace reporting
+      (super.fetchurl {
+        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/8000a97dcca925f6b4dc13e3d2783039ed7b3894.patch";
+        hash = "sha256-DJoCfMmM3UzFb0i/l681e4Q4XhU1FeoHNajju+gaLE0=";
+      })
     ];
   });
 }
