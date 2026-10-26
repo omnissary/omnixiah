@@ -56,94 +56,17 @@ _self: super: {
             };
           }
           {
-            name = "pack magic header ranges into a single integer";
+            name = "amneziawg 3.0 and 3.1 support";
             patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/bebdc16cc82d63629986b534ee85afe5d9389b3c.patch";
-              hash = "sha256-HLhMF5SZEvbitiU8iv6ost5KvPALoi1iwFBqJJFH+K0=";
+              url = "https://git.tatikoma.dev/omnixiah/linux/compare/765842550b5b99db529d43df471ee84d74da7cf8...7727732d33bd4f4200b2893c2ead32eac5742d91.diff";
+              hash = "sha256-6ny/m5lqL/G/x2LXkC+Bh2XLb7eCoDQF8pHmFpkAN28=";
             };
           }
           {
-            name = "reserve an attribute range for local extensions";
+            name = "amneziawg naming, correctness fixes and selftests";
             patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/4192daa20d2d000904944eef64c1098aab6d96e1.patch";
-              hash = "sha256-aoWQLq0z3K69n+ic3oBJMfYiIiPxhX2RIP8rCHaOdxw=";
-            };
-          }
-          {
-            name = "drop advanced security gating";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/a281e2c6f4dad46d21318d055592bfe11902b874.patch";
-              hash = "sha256-y00Hihamjk4uYjabcCKuVkhPc+46fBtvduy3BCckDFA=";
-            };
-          }
-          {
-            name = "resolve packet type and padding once per skb";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/d852d8fbb9f4eec1384187681d24ae9966b28d2c.patch";
-              hash = "sha256-X7sZt34SpGuJaJCvtIx1LP8vkAzPBk0V9V7D6Yy22tE=";
-            };
-          }
-          {
-            name = "add header protection";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/35cd73a1d91d38edf981a15ed33051f8257be5ec.patch";
-              hash = "sha256-5DHVq9TSBs0cCPc9U2jKSsIzBP/h0lfqhSc8Ta5S3tw=";
-            };
-          }
-          {
-            name = "add content padding addition";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/acbe05a38725dbc236d13e47027f8eac37ecbed8.patch";
-              hash = "sha256-CzAjKR+7/x6FV+19ZvfgBa/znPvelLrezplMuoRb81U=";
-            };
-          }
-          {
-            name = "make handshake timings configurable";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/e69ce636075ee1ec76e9d87e4e484d62508a5b4c.patch";
-              hash = "sha256-+xyTAhNzwJP6hzG531/9SZfPlrP2NsmjxNoGGAtSeLE=";
-            };
-          }
-          {
-            name = "use reject_after_time for the zero key material timer";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/cc18ba88b4755a965bcdd7ee736cd67800a384ab.patch";
-              hash = "sha256-pieMHfjtYndLmt6jJo4uSn0Utkhry9tjsE8t5xNdAMk=";
-            };
-          }
-          {
-            name = "use a u16 range for persistent keepalive";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/b45adad3710bcfc20a1a0cde679214eb59e3b05d.patch";
-              hash = "sha256-whbbjF8nUCZrFdSBunydptFQ7Za9G3iD46nt1UDAI0s=";
-            };
-          }
-          {
-            name = "add random trailers";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/4305ab4d288ad09287cca0febfba81a662a0ca90.patch";
-              hash = "sha256-4wiI/Do/Bg2FVwPEEW5BVDDrkWdbUaDeqKQV76WkoVc=";
-            };
-          }
-          {
-            name = "add cookie disabling";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/5e1b76042db202327ae238f782c6faab82c02955.patch";
-              hash = "sha256-foJYzwqLQPDlcBT2a3W04Jne5GFtNnsLThNXgY9uG7U=";
-            };
-          }
-          {
-            name = "indent wg_peer_skb_padding_addition with tabs";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/81dfd86c8fb2f628609abff8cc3e856e9ce1719d.patch";
-              hash = "sha256-IsBlXAvx09i0hvhYDXFRYYI4iRhab0Fn5h+IbjWodEI=";
-            };
-          }
-          {
-            name = "cap JunkPacketMaxSize at 32768";
-            patch = super.fetchurl {
-              url = "https://git.tatikoma.dev/omnixiah/linux/commit/7727732d33bd4f4200b2893c2ead32eac5742d91.patch";
-              hash = "sha256-vRwyzDsBkR/Q54vrHv01KXcXGHIyEoFUNykYN1Ud6xM=";
+              url = "https://git.tatikoma.dev/omnixiah/linux/compare/7727732d33bd4f4200b2893c2ead32eac5742d91...cfdedaaa0b0867366e8045771363a6b727caa9f3.diff";
+              hash = "sha256-pO3wnes9IFp6QYF272289L+H7326psWFCHRNMS+uFeo=";
             };
           }
         ];
