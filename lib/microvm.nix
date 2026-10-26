@@ -27,7 +27,6 @@ in
         self.profiles.base.module
         {
           networking.hostName = mkDefault "omnixiah-${name}";
-          nixpkgs.overlays = [ self.overlays.default ];
         }
       ]
       ++ modules;
