@@ -4,14 +4,12 @@
 # Disabling the one test keeps the remaining suite in place.
 _self: super: {
   pythonPackagesExtensions = super.pythonPackagesExtensions ++ [
-    (
-      _pythonFinal: pythonPrev: {
-        pycairo = pythonPrev.pycairo.overridePythonAttrs (old: {
-          disabledTests = (old.disabledTests or [ ]) ++ [
-            "test_fspaths"
-          ];
-        });
-      }
-    )
+    (_pythonFinal: pythonPrev: {
+      pycairo = pythonPrev.pycairo.overridePythonAttrs (old: {
+        disabledTests = (old.disabledTests or [ ]) ++ [
+          "test_fspaths"
+        ];
+      });
+    })
   ];
 }
