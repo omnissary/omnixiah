@@ -13,13 +13,13 @@ final: _prev: {
 
     stdenvNoCC.mkDerivation {
       pname = "nix-cage";
-      version = "1.0.0-unstable-2026-06-02";
+      version = "1.0.0-unstable-2026-10-26";
       src = fetchFromGitea {
         domain = "git.tatikoma.dev";
         owner = "corpix";
         repo = "nix-cage";
-        rev = "d42ed598bfb24fbfb4b0d131ddd07d7429c81094";
-        hash = "sha256-b3c9O9FFU2hrS3lSfD3Q/t4hj0f2/dX4zlPcCpiWS0A=";
+        rev = "7c0eeca4cd09db0809505d3a33719e5706e633fb";
+        hash = "sha256-xxpC+A1NA2nwAoVHkGF0KhmqXGOPDPDUIz6z09ByokA=";
       };
 
       nativeBuildInputs = [ makeWrapper ];
