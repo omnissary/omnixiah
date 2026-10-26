@@ -17,4 +17,10 @@
   tc = {
     description = "Traffic shaping module NixOS VM test";
   };
+  wireguard = {
+    description = "Wireguard module unit generation evaluation test";
+  };
+  wireguard-amnezia = {
+    description = "AmneziaWG kernel and wg interoperability NixOS VM test";
+  };
 }

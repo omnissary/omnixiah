@@ -40,6 +40,9 @@ in
   tc = import ./modules/tc.nix {
     inherit self testing;
   };
+  wireguard-amnezia = import ./modules/wireguard-amnezia.nix {
+    inherit pkgs self testing;
+  };
   wireguard = import ./modules/wireguard.nix {
     inherit
       inputs
