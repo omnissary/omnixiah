@@ -103,6 +103,7 @@
               inputs.sops.nixosModules.default
               ./profiles/base.nix
             ];
+            nixpkgs.overlays = [ overlay ];
           };
         };
         microvm = {

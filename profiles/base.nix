@@ -1,7 +1,6 @@
 {
   lib,
   pkgs,
-  self,
   ...
 }:
 
@@ -34,7 +33,6 @@ in
   system.stateVersion = mkDefault "25.11";
 
   nixpkgs.config.allowUnfree = mkDefault true;
-  nixpkgs.overlays = [ self.overlays.default ];
 
   modules.boot.consoles = mkDefault [ "ttyS0,115200" ];
 
