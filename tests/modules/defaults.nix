@@ -23,7 +23,7 @@ let
       inherit self;
     };
     modules = [
-      self.profiles.base.module
+      self.profiles.base
       {
         networking.hostName = "defaults";
       }

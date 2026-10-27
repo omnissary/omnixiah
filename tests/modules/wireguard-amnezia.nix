@@ -19,7 +19,7 @@ let
 
   mkNode = _: {
     imports = [
-      self.profiles.base.module
+      self.profiles.base
     ];
 
     networking.firewall.enable = false;

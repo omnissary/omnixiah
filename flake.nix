@@ -77,52 +77,43 @@
     let
       inherit (builtins)
         attrNames
-        filter
         intersectAttrs
-        listToAttrs
-        mapAttrs
         ;
       inherit (nixpkgs) lib;
       inherit (lib)
         composeManyExtensions
         concatStringsSep
+        filter
         genAttrs
+        hasSuffix
         mapAttrs'
         nameValuePair
-        unique
         ;
       inherit (flake-parts.lib) mkFlake;
 
+      baseProfile = {
+        imports = [
+          inputs.disko.nixosModules.default
+          inputs.home-manager.nixosModules.default
+          inputs.sops.nixosModules.default
+          ./profiles/base.nix
+        ];
+        nixpkgs.overlays = [ overlay ];
+      };
       profiles = {
-        base = {
-          description = "Shared defaults for all Omnixiah systems";
-          module = {
-            imports = [
-              inputs.disko.nixosModules.default
-              inputs.home-manager.nixosModules.default
-              inputs.sops.nixosModules.default
-              ./profiles/base.nix
-            ];
-            nixpkgs.overlays = [ overlay ];
-          };
-        };
-        microvm = {
-          description = "Insecure login defaults for disposable local MicroVMs";
-          module = ./profiles/microvm.nix;
-        };
-        qemu = {
-          description = "Hardware defaults for NixOS guests running under QEMU";
-          module = ./profiles/qemu.nix;
-        };
+        base = baseProfile;
+        microvm.imports = [
+          baseProfile
+          ./profiles/microvm.nix
+        ];
+        qemu.imports = [
+          baseProfile
+          ./profiles/qemu.nix
+        ];
       };
-      profileDefinitions = import ./profiles { inherit profiles; };
       testMetadata = import ./tests/metadata.nix;
-      microvmLib = import ./lib/microvm.nix {
-        inherit inputs self;
-      };
-      ownLib = microvmLib // {
+      ownLib = {
         dns = inputs.dns.lib;
-        profiles = profileMetadata;
         tests = testMetadata;
       };
       libCollisions = attrNames (intersectAttrs lib ownLib);
@@ -140,17 +131,9 @@
       overlays = namedOverlays // {
         default = overlay;
       };
-      inherit (microvmLib) mkMicrovmProfile;
 
-      profileNames = attrNames profileDefinitions;
-      profileSystems = unique (map (name: profileDefinitions.${name}.system) profileNames);
       packageSystems = import inputs.systems;
-
-      profileNamesFor = system: filter (name: profileDefinitions.${name}.system == system) profileNames;
-
-      profileMetadata = mapAttrs (_: profile: {
-        inherit (profile) description system;
-      }) profileDefinitions;
+      microvmSystems = filter (hasSuffix "-linux") packageSystems;
 
       pkgsFor = genAttrs packageSystems (
         system:
@@ -160,37 +143,20 @@
           overlays = [ overlay ];
         }
       );
-
-      profilePackages =
+      microvmConfigurations = genAttrs microvmSystems (
         system:
-        listToAttrs (
-          map (name: {
-            inherit name;
-            value = self.nixosConfigurations.${name}.config.microvm.declaredRunner;
-          }) (profileNamesFor system)
-        );
-
-      profileApps =
-        system:
-        mapAttrs (name: runner: {
-          type = "app";
-          program = "${runner}/bin/microvm-run";
-          meta.description = profileDefinitions.${name}.description;
-        }) (profilePackages system);
-
-      profileChecks =
-        system:
-        listToAttrs (
-          map (name: {
-            name = "${name}-eval";
-            value =
-              let
-                pkgs = pkgsFor.${system};
-                config = self.nixosConfigurations.${name}.config;
-              in
-              pkgs.writeText "omnixiah-${name}-eval" config.system.build.toplevel.drvPath;
-          }) (profileNamesFor system)
-        );
+        lib.nixosSystem {
+          inherit system;
+          specialArgs = { inherit inputs self; };
+          modules = [
+            inputs.microvm.nixosModules.microvm
+            profiles.microvm
+            {
+              networking.hostName = lib.mkDefault "omnixiah-microvm";
+            }
+          ];
+        }
+      );
 
       moduleChecks =
         {
@@ -210,7 +176,7 @@
         mapAttrs' (name: test: nameValuePair "module-${name}" test) moduleTests;
     in
     mkFlake { inherit inputs; } {
-      systems = profileSystems;
+      systems = microvmSystems;
 
       imports = [
         inputs.treefmt-nix.flakeModule
@@ -235,9 +201,9 @@
           wireguard = ./modules/wireguard.nix;
         };
 
-        nixosConfigurations = mapAttrs (
-          name: profile: mkMicrovmProfile (profile // { inherit name; })
-        ) profileDefinitions;
+        nixosConfigurations = mapAttrs' (
+          system: configuration: nameValuePair "microvm-${system}" configuration
+        ) microvmConfigurations;
       };
 
       perSystem =
@@ -254,22 +220,32 @@
             ;
 
           pkgs = pkgsFor.${system};
-          apps = profileApps system;
+          configuration = microvmConfigurations.${system};
+          runner = configuration.config.microvm.declaredRunner;
+          microvmApp = {
+            type = "app";
+            program = "${runner}/bin/microvm-run";
+            meta.description = "Run an Omnixiah MicroVM";
+          };
         in
         {
           _module.args.pkgs = pkgs;
 
-          apps = apps // {
-            default = apps.minimal;
+          apps = {
+            default = microvmApp;
+            microvm = microvmApp;
           };
 
-          checks =
-            profileChecks system
-            // moduleChecks { inherit pkgs system; }
-            // {
-              fork-sync = import ./maintenance/fork-sync/tests { inherit pkgs; };
-              package-update = import ./maintenance/package-update/tests { inherit pkgs; };
-            };
+          packages = {
+            default = runner;
+            microvm = runner;
+          };
+
+          checks = moduleChecks { inherit pkgs system; } // {
+            fork-sync = import ./maintenance/fork-sync/tests { inherit pkgs; };
+            microvm-eval = pkgs.writeText "omnixiah-microvm-eval" configuration.config.system.build.toplevel.drvPath;
+            package-update = import ./maintenance/package-update/tests { inherit pkgs; };
+          };
 
           devShells.default = pkgs.mkShellNoCC {
             packages = [

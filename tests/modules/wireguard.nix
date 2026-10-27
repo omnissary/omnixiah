@@ -38,7 +38,7 @@ let
         inherit self;
       };
       modules = [
-        self.profiles.base.module
+        self.profiles.base
         {
           networking.hostName = "wireguard";
           networking.wireguard.enable = true;

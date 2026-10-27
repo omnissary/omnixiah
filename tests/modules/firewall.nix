@@ -18,7 +18,7 @@ testing.runTest {
 
   nodes.machine = {
     imports = [
-      self.profiles.base.module
+      self.profiles.base
     ];
 
     networking.firewall = {
