@@ -130,6 +130,12 @@ in
     upstreamUrl = "https://gitlab.com/simple-nixos-mailserver/nixos-mailserver.git";
   };
 
+  microvm = mkFork {
+    directory = "microvm";
+    upstreamBranch = "main";
+    upstreamUrl = "https://github.com/microvm-nix/microvm.nix";
+  };
+
   nix = mkFork {
     directory = "nix";
     upstreamBranch = "master";

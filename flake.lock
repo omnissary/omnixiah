@@ -240,15 +240,13 @@
       "locked": {
         "lastModified": 1792810338,
         "narHash": "sha256-0DS+A3BsygKRpKe0qmUWVDSfKqpIHZCpHJagAklE0o4=",
-        "owner": "microvm-nix",
-        "repo": "microvm.nix",
         "rev": "4876e2ae2de6ce225f4ccf664ae441128aa3f03a",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/microvm/archive/4876e2ae2de6ce225f4ccf664ae441128aa3f03a.tar.gz"
       },
       "original": {
-        "owner": "microvm-nix",
-        "repo": "microvm.nix",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://git.tatikoma.dev/omnixiah/microvm/archive/omnixiah.tar.gz"
       }
     },
     "nix": {

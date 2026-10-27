@@ -62,7 +62,7 @@
     };
 
     microvm = {
-      url = "github:microvm-nix/microvm.nix";
+      url = "tarball+https://git.tatikoma.dev/omnixiah/microvm/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
