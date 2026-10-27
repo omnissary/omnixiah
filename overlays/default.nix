@@ -63,6 +63,22 @@ let
     );
   };
 
+  testersOverlay = _final: testersPrev: {
+    testers = testersPrev.testers // {
+      runNixOSTest =
+        testModule:
+        testersPrev.testers.runNixOSTest {
+          imports = [
+            {
+              defaults.imports = [ inputs.self.profiles.base ];
+              node.pkgsReadOnly = false;
+            }
+            testModule
+          ];
+        };
+    };
+  };
+
   xlibreOverlay =
     xlibreFinal: xlibrePrev:
     let
@@ -81,6 +97,7 @@ composeManyExtensions (
     pythonPackageOverlay
     xlibreOverlay
     nixVersionsOverlay
+    testersOverlay
   ]
   ++ inputsOverlays
   ++ packageOverlays
