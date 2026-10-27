@@ -1,7 +1,5 @@
 {
   pkgs,
-  self,
-  testing,
 }:
 
 let
@@ -18,10 +16,6 @@ let
   ];
 
   mkNode = _: {
-    imports = [
-      self.profiles.base
-    ];
-
     networking.firewall.enable = false;
 
     environment.systemPackages = [
@@ -30,13 +24,9 @@ let
   };
 in
 
-testing.runTest {
+pkgs.omnixiah.runNixOSTest {
   name = "wireguard-amnezia";
   globalTimeout = 20 * 60;
-
-  node.specialArgs = {
-    inherit self;
-  };
 
   nodes = {
     alice = mkNode 1;

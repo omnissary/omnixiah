@@ -63,11 +63,11 @@ let
     );
   };
 
-  testersOverlay = _final: testersPrev: {
-    testers = testersPrev.testers // {
+  omnixiahOverlay = omnixiahFinal: _prev: {
+    omnixiah = {
       runNixOSTest =
         testModule:
-        testersPrev.testers.runNixOSTest {
+        omnixiahFinal.testers.runNixOSTest {
           imports = [
             {
               defaults.imports = [ inputs.self.profiles.base ];
@@ -97,7 +97,7 @@ composeManyExtensions (
     pythonPackageOverlay
     xlibreOverlay
     nixVersionsOverlay
-    testersOverlay
+    omnixiahOverlay
   ]
   ++ inputsOverlays
   ++ packageOverlays

@@ -1,21 +1,12 @@
 {
-  self,
-  testing,
+  pkgs,
 }:
 
-testing.runTest {
+pkgs.omnixiah.runNixOSTest {
   name = "base-modules";
   globalTimeout = 3 * 60;
 
-  node.specialArgs = {
-    inherit self;
-  };
-
-  nodes.machine = {
-    imports = [
-      self.profiles.base
-    ];
-  };
+  nodes.machine = { };
 
   testScript = ''
     start_all()

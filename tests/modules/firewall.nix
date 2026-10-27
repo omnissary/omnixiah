@@ -1,26 +1,16 @@
 {
   pkgs,
-  self,
-  testing,
 }:
 
 let
   inherit (pkgs) iptables;
 in
 
-testing.runTest {
+pkgs.omnixiah.runNixOSTest {
   name = "firewall-module";
   globalTimeout = 3 * 60;
 
-  node.specialArgs = {
-    inherit self;
-  };
-
   nodes.machine = {
-    imports = [
-      self.profiles.base
-    ];
-
     networking.firewall = {
       backend = "iptables";
       accept = [

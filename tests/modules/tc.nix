@@ -1,21 +1,12 @@
 {
-  self,
-  testing,
+  pkgs,
 }:
 
-testing.runTest {
+pkgs.omnixiah.runNixOSTest {
   name = "tc-module";
   globalTimeout = 3 * 60;
 
-  node.specialArgs = {
-    inherit self;
-  };
-
   nodes.machine = {
-    imports = [
-      self.profiles.base
-    ];
-
     networking.tc.shaper = {
       enable = true;
       interfaces.eth1 = {

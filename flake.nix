@@ -92,6 +92,7 @@
       inherit (flake-parts.lib) mkFlake;
 
       baseProfile = {
+        key = "omnixiah/profiles/base";
         imports = [
           inputs.disko.nixosModules.default
           inputs.home-manager.nixosModules.default

@@ -5,18 +5,12 @@
   system,
 }:
 
-let
-  testing = import "${inputs.nixpkgs}/nixos/lib/testing-python.nix" {
-    inherit pkgs system;
-  };
-in
-
 {
   dns = import ./lib/dns.nix {
     inherit pkgs self;
   };
   base = import ./modules/base.nix {
-    inherit self testing;
+    inherit pkgs;
   };
   defaults = import ./modules/defaults.nix {
     inherit
@@ -35,13 +29,13 @@ in
       ;
   };
   firewall = import ./modules/firewall.nix {
-    inherit pkgs self testing;
+    inherit pkgs;
   };
   tc = import ./modules/tc.nix {
-    inherit self testing;
+    inherit pkgs;
   };
   wireguard-amnezia = import ./modules/wireguard-amnezia.nix {
-    inherit pkgs self testing;
+    inherit pkgs;
   };
   wireguard = import ./modules/wireguard.nix {
     inherit
