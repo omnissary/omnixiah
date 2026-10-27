@@ -186,6 +186,12 @@ in
     upstreamUrl = "https://github.com/mic92/sops-nix";
   };
 
+  systems = mkFork {
+    directory = "systems";
+    upstreamBranch = "main";
+    upstreamUrl = "https://github.com/nix-systems/default";
+  };
+
   xlibre = mkFork {
     directory = "xlibre";
     upstreamBranch = "main";

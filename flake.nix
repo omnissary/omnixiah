@@ -54,7 +54,7 @@
       url = "tarball+https://git.tatikoma.dev/omnixiah/flake-utils/archive/omnixiah.tar.gz";
       inputs.systems.follows = "systems";
     };
-    systems.url = "github:nix-systems/default";
+    systems.url = "tarball+https://git.tatikoma.dev/omnixiah/systems/archive/omnixiah.tar.gz";
 
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
