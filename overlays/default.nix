@@ -11,6 +11,8 @@ let
   inherit (prev.lib)
     composeManyExtensions
     filterAttrs
+    hasPrefix
+    mapAttrs
     sort
     ;
 
@@ -47,7 +49,15 @@ let
 
   nixVersionsOverlay = nixFinal: nixPrev: {
     nixVersions = nixPrev.nixVersions.extend (
-      _final: _prev: {
+      _final: nixVersionsPrev:
+      mapAttrs (
+        name: value:
+        if hasPrefix "nixComponents_" name && value ? overrideScope then
+          value.overrideScope (_final: _prev: { inherit (nixFinal) git; })
+        else
+          value
+      ) nixVersionsPrev
+      // {
         unstable = (inputs.nix.overlays.default nixFinal nixPrev).nix;
       }
     );
