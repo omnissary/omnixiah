@@ -102,6 +102,7 @@
       };
       profiles = {
         base = baseProfile;
+        debug = ./profiles/debug.nix;
         microvm = ./profiles/microvm.nix;
         qemu = ./profiles/qemu.nix;
       };
