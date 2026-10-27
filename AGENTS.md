@@ -2,7 +2,22 @@
 
 ## Project Structure & Module Organization
 
-Omnixiah is a NixOS spin built around reusable NixOS profiles. The root `flake.nix` defines inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, and `modules`. `modules/` holds shared modules such as `modules/firewall.nix`, `modules/nix.nix`, and `modules/tc.nix`. `profiles/` contains the base, MicroVM, and QEMU profile modules. `lib.nixosSystem` applies the base profile to every Omnixiah system and `pkgs.omnixiah.runNixOSTest` applies it to every node of a NixOS VM test. The MicroVM profile is instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
+Omnixiah is a NixOS spin built around reusable NixOS profiles. The root `flake.nix` defines inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, and `modules`. `modules/default.nix` enumerates every file next to it, so a new shared module such as `modules/tc.nix` is registered by dropping the file in. `profiles/` contains the base, debug, MicroVM, and QEMU profile modules. The MicroVM profile is instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
+
+A directory is entered through its `default.nix`, and a file is named after what it is, never after the directory holding it: `modules/tc.nix`, not `modules/tc-module.nix`.
+
+Three layers make up a system, and they must not be mixed:
+
+- `modules/` declares options. Safe to import anywhere, including evaluations Omnixiah does not control.
+- `profiles/base.nix` imports `modules/` and sets the distribution defaults. It declares the read-only marker `omnixiah.base` and must never touch `nixpkgs.*`.
+- The nixpkgs instance (`nixpkgs.config` and `nixpkgs.overlays`) belongs to whoever constructs the system, and is applied by `lib.nixosSystem` alone.
+
+Two entry points apply the base profile, and nothing else does:
+
+- `lib.nixosSystem` passes the base and nixpkgs profiles as `extraModules`, so they survive `specialisation` with `inheritParentConfig = false`.
+- `pkgs.omnixiah.runNixOSTest` passes the base profile as test `defaults`, reaching both nodes and containers. Nodes keep the host package set read-only; a consumer that configures `nixpkgs.*` inside a node sets `node.pkgsReadOnly = false` itself.
+
+Any other evaluation -- a raw `import "${pkgs.path}/nixos"`, a `containers.<name>.config` -- gets no base profile and must import `profiles.base` explicitly. `tests/coverage.nix` asserts the entry points still carry it.
 
 Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
@@ -22,7 +37,7 @@ Direct Nix commands are acceptable for debugging, for example `nix build .#nixos
 
 ## Coding Style & Naming Conventions
 
-Use two-space indentation for Nix files. Use lower camel case for Nix option-style names and kebab-case for files or directories. Place profile implementations in `profiles/<name>.nix`, register them in `flake.nix`, and construct systems with `lib.nixosSystem` so they receive the base profile. Do not shadow generic Nixpkgs builders; Omnixiah-specific builders live under the `pkgs.omnixiah` namespace provided by `overlays/default.nix`.
+Use two-space indentation for Nix files. Use lower camel case for Nix option-style names and kebab-case for files or directories. Place profile implementations in `profiles/<name>.nix`, register them in `flake.nix`, and construct systems with `lib.nixosSystem` so they receive the base profile. Order-sensitive list options such as `boot.kernelParams` must pin their order with `mkBefore` or `mkAfter` instead of relying on module evaluation order. Do not shadow generic Nixpkgs builders; Omnixiah-specific builders live under the `pkgs.omnixiah` namespace provided by `overlays/default.nix`.
 
 Prefer local inherit bindings over repeated qualified calls: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
 
@@ -30,7 +45,7 @@ No shortcuts: follow the architecture, keep changes cohesive, and chase failures
 
 ## Testing Guidelines
 
-Tests under `tests/modules/` should exercise module evaluation or deterministic VM behavior for changed modules. Build VM tests with `pkgs.omnixiah.runNixOSTest` and evaluation tests with `lib.nixosSystem`; neither needs an explicit `profiles.base` import. `pkgs.omnixiah.runNixOSTest` also relaxes `node.pkgsReadOnly`, because the base profile owns `nixpkgs.overlays`. Tests do not have internet access; assert generated configuration, evaluated options, local units, or local network state. Every profile should evaluate with `just eval <profile>`. Before submitting changes, run `just fmt`, `just test`, and `just lint`. CI in `.gitea/workflows/ci.yaml` runs `just lint` and `just test`.
+Tests under `tests/modules/` should exercise module evaluation or deterministic VM behavior for changed modules. Build VM tests with `pkgs.omnixiah.runNixOSTest` and evaluation tests with `lib.nixosSystem`; neither needs an explicit `profiles.base` import. Tests do not have internet access; assert generated configuration, evaluated options, local units, or local network state. Every profile should evaluate with `just eval <profile>`. Before submitting changes, run `just fmt`, `just test`, and `just lint`. CI in `.gitea/workflows/ci.yaml` runs `just lint` and `just test`.
 
 ## Commit & Pull Request Guidelines
 

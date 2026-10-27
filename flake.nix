@@ -99,7 +99,13 @@
           inputs.sops.nixosModules.default
           ./profiles/base.nix
         ];
-        nixpkgs.overlays = [ overlay ];
+      };
+      nixpkgsProfile = {
+        key = "omnixiah/profiles/nixpkgs";
+        nixpkgs = {
+          config.allowUnfree = lib.mkDefault true;
+          overlays = [ overlay ];
+        };
       };
       profiles = {
         base = baseProfile;
@@ -107,11 +113,23 @@
         microvm = ./profiles/microvm.nix;
         qemu = ./profiles/qemu.nix;
       };
+      modules = import ./modules { inherit lib; };
       testMetadata = import ./tests/metadata.nix;
       ownLib = {
         dns = inputs.dns.lib;
         nixosSystem =
-          args: lib.nixosSystem (args // { modules = [ profiles.base ] ++ (args.modules or [ ]); });
+          args:
+          lib.nixosSystem (
+            args
+            // {
+              modules = args.modules or [ ];
+              extraModules = [
+                baseProfile
+                nixpkgsProfile
+              ]
+              ++ (args.extraModules or [ ]);
+            }
+          );
         tests = testMetadata;
       };
       libCollisions = attrNames (removeAttrs (intersectAttrs lib ownLib) [ "nixosSystem" ]);
@@ -181,23 +199,10 @@
       ];
 
       flake = {
-        inherit overlays profiles;
+        inherit modules overlays profiles;
 
         lib = flakeLib;
         pkgs = pkgsFor;
-
-        modules = {
-          fail2ban = ./modules/fail2ban.nix;
-          firewall = ./modules/firewall.nix;
-          nix = ./modules/nix.nix;
-          serial = ./modules/serial.nix;
-          sudo = ./modules/sudo.nix;
-          systemd = ./modules/systemd.nix;
-          tc = ./modules/tc.nix;
-          timesync = ./modules/timesync.nix;
-          update-diff = ./modules/update-diff.nix;
-          wireguard = ./modules/wireguard.nix;
-        };
 
         nixosConfigurations = mapAttrs' (
           system: configuration: nameValuePair "microvm-${system}" configuration

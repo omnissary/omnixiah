@@ -69,10 +69,7 @@ let
         testModule:
         omnixiahFinal.testers.runNixOSTest {
           imports = [
-            {
-              defaults.imports = [ inputs.self.profiles.base ];
-              node.pkgsReadOnly = false;
-            }
+            { defaults.imports = [ inputs.self.profiles.base ]; }
             testModule
           ];
         };

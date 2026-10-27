@@ -5,7 +5,12 @@
 }:
 
 let
-  inherit (lib) mkDefault;
+  inherit (builtins) attrValues;
+  inherit (lib)
+    mkDefault
+    mkOption
+    types
+    ;
   inherit (pkgs)
     coreutils
     iproute2
@@ -17,51 +22,47 @@ let
 in
 
 {
-  imports = [
-    ../modules/fail2ban.nix
-    ../modules/firewall.nix
-    ../modules/nix.nix
-    ../modules/serial.nix
-    ../modules/sudo.nix
-    ../modules/systemd.nix
-    ../modules/tc.nix
-    ../modules/timesync.nix
-    ../modules/update-diff.nix
-    ../modules/wireguard.nix
-  ];
+  imports = attrValues (import ../modules { inherit lib; });
 
-  system.stateVersion = mkDefault "25.11";
-
-  nixpkgs.config.allowUnfree = mkDefault true;
-
-  modules.boot.consoles = mkDefault [ "ttyS0,115200" ];
-
-  networking = {
-    useNetworkd = mkDefault true;
-    firewall.enable = mkDefault true;
+  options.omnixiah.base = mkOption {
+    type = types.bool;
+    readOnly = true;
+    default = true;
+    description = "Whether this configuration was built from the Omnixiah base profile.";
   };
 
-  systemd.network.enable = mkDefault true;
+  config = {
+    system.stateVersion = mkDefault "25.11";
 
-  services.openssh.enable = mkDefault false;
+    modules.boot.consoles = mkDefault [ "ttyS0,115200" ];
 
-  users.mutableUsers = mkDefault false;
+    networking = {
+      useNetworkd = mkDefault true;
+      firewall.enable = mkDefault true;
+    };
 
-  documentation = {
-    doc.enable = mkDefault false;
-    info.enable = mkDefault false;
-    man.enable = mkDefault false;
-    nixos.enable = mkDefault false;
+    systemd.network.enable = mkDefault true;
+
+    services.openssh.enable = mkDefault false;
+
+    users.mutableUsers = mkDefault false;
+
+    documentation = {
+      doc.enable = mkDefault false;
+      info.enable = mkDefault false;
+      man.enable = mkDefault false;
+      nixos.enable = mkDefault false;
+    };
+
+    programs.command-not-found.enable = mkDefault false;
+
+    environment.systemPackages = [
+      coreutils
+      iproute2
+      iputils
+      procps
+      util-linux
+      vim
+    ];
   };
-
-  programs.command-not-found.enable = mkDefault false;
-
-  environment.systemPackages = [
-    coreutils
-    iproute2
-    iputils
-    procps
-    util-linux
-    vim
-  ];
 }

@@ -6,6 +6,9 @@
 }:
 
 {
+  coverage = import ./coverage.nix {
+    inherit pkgs self system;
+  };
   dns = import ./lib/dns.nix {
     inherit pkgs self;
   };

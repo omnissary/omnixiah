@@ -9,6 +9,7 @@ let
   inherit (lib)
     any
     hasPrefix
+    mkBefore
     mkOption
     optional
     optionalString
@@ -50,7 +51,7 @@ in
   };
 
   config = {
-    boot.kernelParams = map (console: "console=${console}") config.modules.boot.consoles;
+    boot.kernelParams = mkBefore (map (console: "console=${console}") config.modules.boot.consoles);
 
     environment.loginShellInit = "${resize}/bin/resize";
     environment.systemPackages = [ resize ];

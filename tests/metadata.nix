@@ -1,4 +1,7 @@
 {
+  coverage = {
+    description = "Base profile coverage of the Omnixiah entry points";
+  };
   dns = {
     description = "DNS library export evaluation test";
   };
