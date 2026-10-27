@@ -192,6 +192,12 @@ in
     upstreamUrl = "https://github.com/nix-systems/default";
   };
 
+  treefmt = mkFork {
+    directory = "treefmt";
+    upstreamBranch = "main";
+    upstreamUrl = "https://github.com/numtide/treefmt-nix";
+  };
+
   xlibre = mkFork {
     directory = "xlibre";
     upstreamBranch = "main";

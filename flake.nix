@@ -57,7 +57,7 @@
     systems.url = "tarball+https://git.tatikoma.dev/omnixiah/systems/archive/omnixiah.tar.gz";
 
     treefmt-nix = {
-      url = "github:numtide/treefmt-nix";
+      url = "tarball+https://git.tatikoma.dev/omnixiah/treefmt/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
