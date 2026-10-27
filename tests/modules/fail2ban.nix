@@ -12,9 +12,9 @@ let
     concatStringsSep
     elem
     hasInfix
-    nixosSystem
     optionals
     ;
+  inherit (self.lib) nixosSystem;
 
   cfg =
     (nixosSystem {
@@ -23,7 +23,6 @@ let
         inherit self;
       };
       modules = [
-        self.profiles.base
         {
           networking = {
             hostName = "fail2ban-test";

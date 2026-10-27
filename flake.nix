@@ -102,21 +102,17 @@
       };
       profiles = {
         base = baseProfile;
-        microvm.imports = [
-          baseProfile
-          ./profiles/microvm.nix
-        ];
-        qemu.imports = [
-          baseProfile
-          ./profiles/qemu.nix
-        ];
+        microvm = ./profiles/microvm.nix;
+        qemu = ./profiles/qemu.nix;
       };
       testMetadata = import ./tests/metadata.nix;
       ownLib = {
         dns = inputs.dns.lib;
+        nixosSystem =
+          args: lib.nixosSystem (args // { modules = [ profiles.base ] ++ (args.modules or [ ]); });
         tests = testMetadata;
       };
-      libCollisions = attrNames (intersectAttrs lib ownLib);
+      libCollisions = attrNames (removeAttrs (intersectAttrs lib ownLib) [ "nixosSystem" ]);
       flakeLib =
         if libCollisions == [ ] then
           lib // ownLib
@@ -145,7 +141,7 @@
       );
       microvmConfigurations = genAttrs microvmSystems (
         system:
-        lib.nixosSystem {
+        ownLib.nixosSystem {
           inherit system;
           specialArgs = { inherit inputs self; };
           modules = [

@@ -13,9 +13,9 @@ let
     elem
     hasAttrByPath
     hasInfix
-    nixosSystem
     optionals
     ;
+  inherit (self.lib) nixosSystem;
 
   evaluated = nixosSystem {
     inherit system;
@@ -23,7 +23,6 @@ let
       inherit self;
     };
     modules = [
-      self.profiles.base
       {
         networking.hostName = "defaults";
       }

@@ -11,9 +11,9 @@ let
     concatStringsSep
     filter
     hasInfix
-    nixosSystem
     optionals
     ;
+  inherit (self.lib) nixosSystem;
 
   interface = {
     jc = 4;
@@ -38,7 +38,6 @@ let
         inherit self;
       };
       modules = [
-        self.profiles.base
         {
           networking.hostName = "wireguard";
           networking.wireguard.enable = true;
