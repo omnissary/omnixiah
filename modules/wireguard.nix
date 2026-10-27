@@ -194,8 +194,8 @@ in
 
           networkdUnits = mapAttrs' (
             name: interface:
-            nameValuePair "wireguard-amnezia-${name}" {
-              description = "Apply AmneziaWG parameters to WireGuard interface ${name}";
+            nameValuePair "wireguard-obfuscation-${name}" {
+              description = "Apply obfuscation parameters to WireGuard interface ${name}";
               after = [ "sys-subsystem-net-devices-${name}.device" ];
               bindsTo = [ "sys-subsystem-net-devices-${name}.device" ];
               wantedBy = [ "sys-subsystem-net-devices-${name}.device" ];
