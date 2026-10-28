@@ -64,6 +64,10 @@ let
     );
   };
 
+  nixosAnywhereOverlay = nixosAnywhereFinal: _prev: {
+    nixos-anywhere = nixosAnywhereFinal.callPackage (inputs.nixos-anywhere + "/src") { };
+  };
+
   omnixiahOverlay = omnixiahFinal: _prev: {
     omnixiah = {
       runNixOSTest =
@@ -98,6 +102,7 @@ composeManyExtensions (
     pythonPackageOverlay
     xlibreOverlay
     nixVersionsOverlay
+    nixosAnywhereOverlay
     omnixiahOverlay
   ]
   ++ inputsOverlays

@@ -5,17 +5,16 @@
         "flake-parts": [
           "flake-parts"
         ],
-        "nixos-anywhere": "nixos-anywhere",
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1792757042,
-        "narHash": "sha256-S89v8ZuGDIR63M5IlIJaYOkEnUvnH0qy7oB+4XIpk1I=",
-        "rev": "76bfc3c7ef2a771ed9e02bd9392219c0a73cc0fe",
+        "lastModified": 1793178164,
+        "narHash": "sha256-+Tz3UW3JQTlmuzcI98tfhaJXDNLPJIoRBBlFDLmPR5o=",
+        "rev": "f4d3b4064019e3444bbeaa62e508ccb8d28490b6",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/76bfc3c7ef2a771ed9e02bd9392219c0a73cc0fe.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/f4d3b4064019e3444bbeaa62e508ccb8d28490b6.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -23,29 +22,6 @@
       }
     },
     "disko": {
-      "inputs": {
-        "nixpkgs": [
-          "deploy",
-          "nixos-anywhere",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1769524058,
-        "narHash": "sha256-zygdD6X1PcVNR2PsyK4ptzrVEiAdbMqLos7utrMDEWE=",
-        "owner": "nix-community",
-        "repo": "disko",
-        "rev": "71a3fc97d80881e91710fe721f1158d3b96ae14d",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "ref": "master",
-        "repo": "disko",
-        "type": "github"
-      }
-    },
-    "disko_2": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
@@ -270,98 +246,18 @@
         "url": "https://git.tatikoma.dev/omnixiah/nix/archive/omnixiah.tar.gz"
       }
     },
-    "nix-vm-test": {
-      "inputs": {
-        "nixpkgs": [
-          "deploy",
-          "nixos-anywhere",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1776950483,
-        "narHash": "sha256-ciWvxGmVY4axQSVpUpCUFM1ejHb1LyZ54TrTPeDL3aU=",
-        "owner": "a-kenji",
-        "repo": "nix-vm-test",
-        "rev": "f02b5e1bb5bcb0dbdb60e402fa567f1ceab1af11",
-        "type": "github"
-      },
-      "original": {
-        "owner": "a-kenji",
-        "ref": "pr-105-latest",
-        "repo": "nix-vm-test",
-        "type": "github"
-      }
-    },
     "nixos-anywhere": {
-      "inputs": {
-        "disko": "disko",
-        "flake-parts": [
-          "deploy",
-          "flake-parts"
-        ],
-        "nix-vm-test": "nix-vm-test",
-        "nixos-images": "nixos-images",
-        "nixos-stable": "nixos-stable",
-        "nixpkgs": [
-          "deploy",
-          "nixpkgs"
-        ],
-        "treefmt-nix": "treefmt-nix"
-      },
+      "flake": false,
       "locked": {
-        "lastModified": 1779492618,
-        "narHash": "sha256-p7dvv4C4qAGdE3LVO+e+vtPb7L76/Ax/w3VzDn24F6U=",
-        "rev": "835e722926f784a07383e949c093c2339e5a7438",
+        "lastModified": 1792763369,
+        "narHash": "sha256-akZ7dkhtJhRIyFkpxK/jI5TJzPHBE9Ps/QE0FNhtbko=",
+        "rev": "cc3f53246184e07a71d78c289724ae9c30424c90",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixos-anywhere/archive/835e722926f784a07383e949c093c2339e5a7438.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixos-anywhere/archive/cc3f53246184e07a71d78c289724ae9c30424c90.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/omnixiah/nixos-anywhere/archive/835e722926f784a07383e949c093c2339e5a7438.tar.gz"
-      }
-    },
-    "nixos-images": {
-      "inputs": {
-        "nixos-stable": [
-          "deploy",
-          "nixos-anywhere",
-          "nixos-stable"
-        ],
-        "nixos-unstable": [
-          "deploy",
-          "nixos-anywhere",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1778754897,
-        "narHash": "sha256-UlPBPrqOYTDB9g/8pUaIUzYpGgjQL/YMK3Ein6m9DkY=",
-        "owner": "nix-community",
-        "repo": "nixos-images",
-        "rev": "66fe34a02cc29c825fdb4ece1a79c17e8f2ade2e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "nixos-images",
-        "type": "github"
-      }
-    },
-    "nixos-stable": {
-      "locked": {
-        "lastModified": 1769598131,
-        "narHash": "sha256-e7VO/kGLgRMbWtpBqdWl0uFg8Y2XWFMdz0uUJvlML8o=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "fa83fd837f3098e3e678e6cf017b2b36102c7211",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixos-25.11",
-        "repo": "nixpkgs",
-        "type": "github"
+        "url": "https://git.tatikoma.dev/omnixiah/nixos-anywhere/archive/omnixiah.tar.gz"
       }
     },
     "nixpkgs": {
@@ -440,17 +336,18 @@
     "root": {
       "inputs": {
         "deploy": "deploy",
-        "disko": "disko_2",
+        "disko": "disko",
         "dns": "dns",
         "flake-parts": "flake-parts",
         "flake-utils": "flake-utils_2",
         "home-manager": "home-manager",
         "microvm": "microvm",
         "nix": "nix",
+        "nixos-anywhere": "nixos-anywhere",
         "nixpkgs": "nixpkgs_2",
         "sops": "sops",
         "systems": "systems",
-        "treefmt-nix": "treefmt-nix_2",
+        "treefmt-nix": "treefmt-nix",
         "xlibre": "xlibre"
       }
     },
@@ -502,28 +399,6 @@
       }
     },
     "treefmt-nix": {
-      "inputs": {
-        "nixpkgs": [
-          "deploy",
-          "nixos-anywhere",
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1769691507,
-        "narHash": "sha256-8aAYwyVzSSwIhP2glDhw/G0i5+wOrren3v6WmxkVonM=",
-        "owner": "numtide",
-        "repo": "treefmt-nix",
-        "rev": "28b19c5844cc6e2257801d43f2772a4b4c050a1b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "treefmt-nix",
-        "type": "github"
-      }
-    },
-    "treefmt-nix_2": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"
