@@ -235,11 +235,11 @@
         "nixpkgs-regression": "nixpkgs-regression"
       },
       "locked": {
-        "lastModified": 1792762608,
-        "narHash": "sha256-cmZC20hbgvELBkOiU5WqNgEwQ8sGDJFMTAtQK0H/dPY=",
-        "rev": "fc5bc33248843f2eb58fc608f834cbe476d79073",
+        "lastModified": 1793183276,
+        "narHash": "sha256-i+B7kKyKiXe/x5EgcaVjWuo/to+jzJ9ULr5/5aMYnbk=",
+        "rev": "e014d46f91a8a4616763ba17fb2610cce9ced570",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nix/archive/fc5bc33248843f2eb58fc608f834cbe476d79073.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nix/archive/e014d46f91a8a4616763ba17fb2610cce9ced570.tar.gz"
       },
       "original": {
         "type": "tarball",
