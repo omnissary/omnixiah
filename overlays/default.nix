@@ -13,6 +13,7 @@ let
     filterAttrs
     hasPrefix
     mapAttrs
+    mkDefault
     sort
     ;
 
@@ -69,7 +70,10 @@ let
         testModule:
         omnixiahFinal.testers.runNixOSTest {
           imports = [
-            { defaults.imports = [ inputs.self.profiles.base ]; }
+            {
+              defaults.imports = [ inputs.self.profiles.base ];
+              node.pkgsReadOnly = mkDefault false;
+            }
             testModule
           ];
         };
@@ -84,7 +88,7 @@ let
       ]
       ++ filter (name: name != "xlibre-xserver") (attrNames inputs.xlibre.overlays);
     in
-    xlibrePrev.lib.composeManyExtensions (map (
+    composeManyExtensions (map (
       name: inputs.xlibre.overlays.${name}
     ) overlayNames) xlibreFinal xlibrePrev;
 

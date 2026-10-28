@@ -69,213 +69,21 @@
 
   outputs =
     inputs@{
-      self,
       flake-parts,
       nixpkgs,
       ...
     }:
     let
-      inherit (builtins)
-        attrNames
-        intersectAttrs
-        ;
-      inherit (nixpkgs) lib;
-      inherit (lib)
-        composeManyExtensions
-        concatStringsSep
-        filter
-        genAttrs
-        hasSuffix
-        mapAttrs'
-        nameValuePair
-        ;
       inherit (flake-parts.lib) mkFlake;
-
-      baseProfile = {
-        key = "omnixiah/profiles/base";
-        imports = [
-          inputs.disko.nixosModules.default
-          inputs.home-manager.nixosModules.default
-          inputs.sops.nixosModules.default
-          ./profiles/base.nix
-        ];
-      };
-      nixpkgsProfile = {
-        key = "omnixiah/profiles/nixpkgs";
-        nixpkgs = {
-          config.allowUnfree = lib.mkDefault true;
-          overlays = [ overlay ];
-        };
-      };
-      profiles = {
-        base = baseProfile;
-        debug = ./profiles/debug.nix;
-        microvm = ./profiles/microvm.nix;
-        qemu = ./profiles/qemu.nix;
-      };
-      modules = import ./modules { inherit lib; };
-      testMetadata = import ./tests/metadata.nix;
-      ownLib = {
-        dns = inputs.dns.lib;
-        nixosSystem =
-          args:
-          lib.nixosSystem (
-            args
-            // {
-              modules = args.modules or [ ];
-              extraModules = [
-                baseProfile
-                nixpkgsProfile
-              ]
-              ++ (args.extraModules or [ ]);
-            }
-          );
-        tests = testMetadata;
-      };
-      libCollisions = attrNames (removeAttrs (intersectAttrs lib ownLib) [ "nixosSystem" ]);
-      flakeLib =
-        if libCollisions == [ ] then
-          lib // ownLib
-        else
-          throw "Omnixiah lib collides with nixpkgs lib: ${concatStringsSep ", " libCollisions}";
-
-      namedOverlays = {
-        omnixiah = import ./overlays { inherit inputs; };
-      };
-      enabledOverlayNames = [ "omnixiah" ];
-      overlay = composeManyExtensions (map (name: namedOverlays.${name}) enabledOverlayNames);
-      overlays = namedOverlays // {
-        default = overlay;
-      };
-
-      packageSystems = import inputs.systems;
-      microvmSystems = filter (hasSuffix "-linux") packageSystems;
-
-      pkgsFor = genAttrs packageSystems (
-        system:
-        import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-          overlays = [ overlay ];
-        }
-      );
-      microvmConfigurations = genAttrs microvmSystems (
-        system:
-        ownLib.nixosSystem {
-          inherit system;
-          specialArgs = { inherit inputs self; };
-          modules = [
-            inputs.microvm.nixosModules.microvm
-            profiles.microvm
-            {
-              networking.hostName = lib.mkDefault "omnixiah-microvm";
-            }
-          ];
-        }
-      );
-
-      moduleChecks =
-        {
-          pkgs,
-          system,
-        }:
-        let
-          moduleTests = import ./tests {
-            inherit
-              inputs
-              pkgs
-              self
-              system
-              ;
-          };
-        in
-        mapAttrs' (name: test: nameValuePair "module-${name}" test) moduleTests;
+      inherit (nixpkgs.lib) filter hasSuffix;
     in
     mkFlake { inherit inputs; } {
-      systems = microvmSystems;
-
+      systems = filter (hasSuffix "-linux") (import inputs.systems);
       imports = [
         inputs.treefmt-nix.flakeModule
+        ./flake/core.nix
+        ./flake/development.nix
+        ./flake/microvm.nix
       ];
-
-      flake = {
-        inherit modules overlays profiles;
-
-        lib = flakeLib;
-        pkgs = pkgsFor;
-
-        nixosConfigurations = mapAttrs' (
-          system: configuration: nameValuePair "microvm-${system}" configuration
-        ) microvmConfigurations;
-      };
-
-      perSystem =
-        {
-          config,
-          system,
-          ...
-        }:
-        let
-          inherit (pkgs)
-            git
-            jq
-            just
-            ;
-
-          pkgs = pkgsFor.${system};
-          configuration = microvmConfigurations.${system};
-          runner = configuration.config.microvm.declaredRunner;
-          microvmApp = {
-            type = "app";
-            program = "${runner}/bin/microvm-run";
-            meta.description = "Run an Omnixiah MicroVM";
-          };
-        in
-        {
-          _module.args.pkgs = pkgs;
-
-          apps = {
-            default = microvmApp;
-            microvm = microvmApp;
-          };
-
-          packages = {
-            default = runner;
-            microvm = runner;
-          };
-
-          checks = moduleChecks { inherit pkgs system; } // {
-            fork-sync = import ./maintenance/fork-sync/tests { inherit pkgs; };
-            microvm-eval = pkgs.writeText "omnixiah-microvm-eval" configuration.config.system.build.toplevel.drvPath;
-            package-update = import ./maintenance/package-update/tests { inherit pkgs; };
-          };
-
-          devShells.default = pkgs.mkShellNoCC {
-            packages = [
-              git
-              just
-              jq
-            ]
-            ++ [
-              config.treefmt.build.wrapper
-            ];
-          };
-
-          treefmt = {
-            projectRootFile = "flake.nix";
-
-            programs.shellcheck.enable = true;
-
-            programs.deadnix.enable = true;
-            programs.deadnix.priority = 1;
-            programs.deadnix.no-lambda-arg = true;
-
-            programs.statix.enable = true;
-            programs.statix.priority = 2;
-
-            programs.nixfmt.enable = true;
-            programs.nixfmt.priority = 3;
-          };
-        };
     };
 }

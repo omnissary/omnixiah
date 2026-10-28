@@ -39,7 +39,7 @@ Direct Nix commands are acceptable for debugging, for example `nix build .#nixos
 
 Use two-space indentation for Nix files. Use lower camel case for Nix option-style names and kebab-case for files or directories. Place profile implementations in `profiles/<name>.nix`, register them in `flake.nix`, and construct systems with `lib.nixosSystem` so they receive the base profile. Order-sensitive list options such as `boot.kernelParams` must pin their order with `mkBefore` or `mkAfter` instead of relying on module evaluation order. Do not shadow generic Nixpkgs builders; Omnixiah-specific builders live under the `pkgs.omnixiah` namespace provided by `overlays/default.nix`.
 
-Prefer local inherit bindings over repeated qualified calls: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
+In Nix files, bring helpers into scope with local inherit bindings instead of using qualified calls such as `lib.mkDefault`: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep each inherit list limited to names used in that file. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
 
 No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles.
 
