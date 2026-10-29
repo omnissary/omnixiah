@@ -1,6 +1,21 @@
 final: prev:
 let
-  inherit (prev.lib) hasPrefix;
+  inherit (builtins)
+    attrNames
+    filter
+    listToAttrs
+    match
+    readDir
+    ;
+  inherit (prev.lib)
+    concatMap
+    hasPrefix
+    nameValuePair
+    removePrefix
+    removeSuffix
+    ;
+
+  nodejsPath = prev.path + "/pkgs/development/web/nodejs";
 
   skipZfsFilenameTests =
     package:
@@ -13,18 +28,30 @@ let
           flag
       ) (old.checkFlags or [ ]);
     });
+
+  nodejsVersions = map (name: removeSuffix ".nix" (removePrefix "v" name)) (
+    filter (name: match "v[0-9]+\\.nix" name != null) (attrNames (readDir nodejsPath))
+  );
+  nodejsSlimNames = map (version: "nodejs-slim_${version}") nodejsVersions;
+  versionedNodejs = listToAttrs (
+    concatMap (
+      slimName:
+      let
+        version = removePrefix "nodejs-slim_" slimName;
+      in
+      [
+        (nameValuePair slimName (skipZfsFilenameTests prev.${slimName}))
+        (nameValuePair "nodejs_${version}" (
+          prev.callPackage (nodejsPath + "/symlink.nix") {
+            nodejs-slim = final.${slimName};
+          }
+        ))
+      ]
+    ) nodejsSlimNames
+  );
 in
-{
-  nodejs-slim_24 = skipZfsFilenameTests prev.nodejs-slim_24;
-  nodejs_24 = prev.callPackage (prev.path + "/pkgs/development/web/nodejs/symlink.nix") {
-    nodejs-slim = final.nodejs-slim_24;
-  };
-
-  nodejs-slim_26 = skipZfsFilenameTests prev.nodejs-slim_26;
-  nodejs_26 = prev.callPackage (prev.path + "/pkgs/development/web/nodejs/symlink.nix") {
-    nodejs-slim = final.nodejs-slim_26;
-  };
-
+versionedNodejs
+// {
   nodejs-slim = final.nodejs-slim_24;
   nodejs = final.nodejs_24;
 }
