@@ -20,6 +20,11 @@ in
     nodejs-slim = final.nodejs-slim_24;
   };
 
+  nodejs-slim_26 = skipZfsFilenameTests prev.nodejs-slim_26;
+  nodejs_26 = prev.callPackage (prev.path + "/pkgs/development/web/nodejs/symlink.nix") {
+    nodejs-slim = final.nodejs-slim_26;
+  };
+
   nodejs-slim = final.nodejs-slim_24;
   nodejs = final.nodejs_24;
 }
