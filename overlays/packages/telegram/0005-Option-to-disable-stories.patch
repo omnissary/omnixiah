@@ -1,5 +1,5 @@
 diff --git a/Telegram/SourceFiles/data/data_stories.cpp b/Telegram/SourceFiles/data/data_stories.cpp
-index 232f352..86c9056 100644
+index a1d5d89580..dcd75f3505 100644
 --- a/Telegram/SourceFiles/data/data_stories.cpp
 +++ b/Telegram/SourceFiles/data/data_stories.cpp
 @@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
@@ -57,7 +57,7 @@ index 232f352..86c9056 100644
  	if (_loadMoreRequestId[index] || _sourcesLoaded[index]) {
  		return;
 diff --git a/Telegram/SourceFiles/data/data_stories.h b/Telegram/SourceFiles/data/data_stories.h
-index b944a76..7338434 100644
+index b944a76da2..7338434b3e 100644
 --- a/Telegram/SourceFiles/data/data_stories.h
 +++ b/Telegram/SourceFiles/data/data_stories.h
 @@ -38,6 +38,8 @@ class Story;
@@ -70,10 +70,10 @@ index b944a76..7338434 100644
  	std::vector<StoryId> list; // flat_set<int, greater> for saved/archive.
  	std::vector<StoryId> pinnedToTop;
 diff --git a/Telegram/SourceFiles/settings/settings_experimental.cpp b/Telegram/SourceFiles/settings/settings_experimental.cpp
-index 809793c..aaf1f86 100644
+index f165369e71..8e3aa6e449 100644
 --- a/Telegram/SourceFiles/settings/settings_experimental.cpp
 +++ b/Telegram/SourceFiles/settings/settings_experimental.cpp
-@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
  #include "core/launcher.h"
  #include "core/sandbox.h"
  #include "chat_helpers/tabbed_panel.h"
@@ -81,11 +81,11 @@ index 809793c..aaf1f86 100644
  #include "dialogs/dialogs_entry.h"
  #include "dialogs/dialogs_widget.h"
  #include "dialogs/ui/dialogs_layout.h"
-@@ -279,6 +280,7 @@ void SetupExperimental(
- 	};
- 
- 	addToggle(ChatHelpers::kOptionTabbedPanelShowOnClick);
-+	addToggle(Data::kOptionDisableStories);
- 	addToggle(Dialogs::kOptionForumHideChatsList);
- 	addToggle(Dialogs::kOptionDialogsUnreadOnTop);
- 	addToggle(Dialogs::Ui::kOptionDialogsMuteIcon);
+@@ -386,6 +387,7 @@ void SetupExperimental(
+ 		{
+ 			u"Chats"_q,
+ 			{
++				Data::kOptionDisableStories,
+ 				Dialogs::kOptionForumHideChatsList,
+ 				Dialogs::kOptionDialogsUnreadOnTop,
+ 				Dialogs::Ui::kOptionDialogsMuteIcon,
