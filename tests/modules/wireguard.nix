@@ -50,7 +50,7 @@ let
   networkd = evaluate { networking.useNetworkd = true; };
   classic = evaluate { networking.useNetworkd = false; };
 
-  networkdScript = networkd.systemd.services."wireguard-amnezia-wg0".script;
+  networkdScript = networkd.systemd.services."wireguard-obfuscation-wg0".script;
   classicScript = classic.systemd.services."wireguard-wg0".script;
 
   # A CPS descriptor contains shell metacharacters, so an unquoted value
