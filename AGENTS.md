@@ -21,7 +21,7 @@ Any other evaluation -- a raw `import "${pkgs.path}/nixos"`, a `containers.<name
 
 Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
-Offline evaluation must work on installed systems. Flake input sources are part of the system configuration: use `lib.flakes.inputSources` to retain the complete input graph in `system.extraDependencies` so garbage collection cannot remove it. When changing flake inputs or legacy Nix entry points, preserve this guarantee in both Omnixiah and its consumers.
+Offline evaluation must work on installed systems. Flake input sources are part of the system configuration and must survive garbage collection. Omnixiah's base profile sets `system.extraDependencies = inputSources inputs.self;`, importing `inputSources` from `lib/flakes.nix`. Consumers set `system.extraDependencies = inputs.omnixiah.lib.flakes.inputSources self;` for their own root flake. Keep the complete input graph in this option when changing flake inputs or legacy Nix entry points.
 
 ## Build, Test, and Development Commands
 
