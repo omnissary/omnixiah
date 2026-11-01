@@ -13,18 +13,6 @@ let
     nameValuePair
     ;
   inherit (import ../lib/flakes.nix) inputSources;
-  overlayFor =
-    entry:
-    if entry.flake != null then
-      entry.flake.overlays.${entry.name}
-    else
-      (import entry.path).${entry.name};
-  overlayExpression =
-    entry:
-    if entry.flake != null then
-      ''(getFlake "${entry.flake}").overlays.${toJSON entry.name}''
-    else
-      ''(import "${entry.path}").${toJSON entry.name}'';
 in
 {
   base =
@@ -37,7 +25,9 @@ in
           inherit (builtins) getFlake;
         in
         [
-          ${concatMapStringsSep "\n" overlayExpression cfg.overlays}
+          ${concatMapStringsSep "\n" (
+            entry: ''(getFlake "${entry.flake}").overlays.${toJSON entry.name}''
+          ) cfg.overlays}
         ]
       '';
     in
@@ -51,7 +41,7 @@ in
       ];
       nixpkgs = {
         config.allowUnfree = mkDefault true;
-        overlays = map overlayFor cfg.overlays;
+        overlays = map (entry: entry.flake.overlays.${entry.name}) cfg.overlays;
       };
       omnixiah.nix = {
         overlays = mkBefore [ { flake = inputs.self; } ];
@@ -68,10 +58,6 @@ in
           "omnixiah/nixpkgs".source = pkgs.path;
           "omnixiah/overlays.nix".source = overlaysFile;
         };
-      assertions = map (entry: {
-        assertion = (entry.flake != null) != (entry.path != null);
-        message = "An Omnixiah Nix overlay must specify exactly one of flake or path.";
-      }) cfg.overlays;
       system.extraDependencies = inputSources inputs.self;
     };
 

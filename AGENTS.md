@@ -23,7 +23,7 @@ Use neighboring repositories as context only: `../infra/flake.nix` supplies the 
 
 Offline evaluation must work on installed systems. Flake input sources are part of the system configuration and must survive garbage collection. Omnixiah's base profile retains its own input graph. Consumers pass `rootFlake = self` to `lib.nixosSystem`, which retains their complete input graph and exposes it at `/etc/omnixiah/system`.
 
-Omnixiah owns the installed system's legacy Nix paths. Keep `NIX_PATH` entries under `/etc/omnixiah` so their values stay stable across rebuilds. Consumers add flake overlays or importable overlay files through `omnixiah.nix.overlays` and source aliases through `omnixiah.nix.sources`; the profile applies the same ordered overlays to the system package set and generates the legacy overlay file. Do not set a second `nixpkgs-overlays` entry or another `/etc` source tree in consumers.
+Omnixiah owns the installed system's legacy Nix paths. Keep `NIX_PATH` entries under `/etc/omnixiah` so their values stay stable across rebuilds. Consumers export overlays from their flakes and register them through `omnixiah.nix.overlays`, then add source aliases through `omnixiah.nix.sources`. The profile applies the same ordered overlays to the system package set and generates the legacy overlay file. Do not set a second `nixpkgs-overlays` entry or another `/etc` source tree in consumers.
 
 ## Build, Test, and Development Commands
 

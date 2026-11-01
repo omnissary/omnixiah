@@ -9,19 +9,13 @@ in
         types.submodule {
           options = {
             flake = mkOption {
-              type = types.nullOr types.raw;
-              default = null;
+              type = types.raw;
               description = "Flake that exports the overlay.";
-            };
-            path = mkOption {
-              type = types.nullOr types.pathInStore;
-              default = null;
-              description = "Importable source file that exports the overlay.";
             };
             name = mkOption {
               type = types.str;
               default = "default";
-              description = "Name of the overlay exported by the flake or source file.";
+              description = "Name of the overlay exported by the flake.";
             };
           };
         }
