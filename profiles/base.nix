@@ -34,6 +34,13 @@ in
   config = {
     system.stateVersion = mkDefault "25.11";
 
+    system.nixos = {
+      distroId = mkDefault "omnixiah";
+      distroName = mkDefault "Omnixiah NixOS";
+      vendorId = mkDefault "omnixiah";
+      vendorName = mkDefault "Omnixiah";
+    };
+
     networking = {
       useNetworkd = mkDefault true;
       firewall.enable = mkDefault true;

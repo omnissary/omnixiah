@@ -71,6 +71,18 @@ let
     ++ optionals (cfg.nix.settings.connect-timeout != 5) [
       "nix connect-timeout default changed"
     ]
+    ++ optionals (cfg.system.nixos.distroId != "omnixiah") [
+      "distribution ID changed"
+    ]
+    ++ optionals (cfg.system.nixos.distroName != "Omnixiah NixOS") [
+      "distribution name changed"
+    ]
+    ++ optionals (!hasInfix "ID_LIKE=nixos" cfg.environment.etc."os-release".text) [
+      "os-release NixOS lineage is missing"
+    ]
+    ++ optionals (!hasInfix "DISTRIB_ID=omnixiah" cfg.environment.etc."lsb-release".text) [
+      "lsb-release distribution ID changed"
+    ]
     ++ map (feature: "${feature} experimental feature is missing") missingExperimentalFeatures
     ++ optionals (cfg.modules.boot.consoles != [ "tty0" ]) [
       "default boot console changed"
