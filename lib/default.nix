@@ -8,8 +8,9 @@ let
   inherit (builtins)
     attrNames
     intersectAttrs
+    removeAttrs
     ;
-  inherit (lib) concatStringsSep nixosSystem;
+  inherit (lib) concatStringsSep mkDefault nixosSystem;
 
   flakeLib = import ./flakes.nix;
 
@@ -17,11 +18,21 @@ let
     dns = inputs.dns.lib;
     nixosSystem =
       args:
+      let
+        rootFlake = args.rootFlake or inputs.self;
+      in
       nixosSystem (
-        args
+        (removeAttrs args [ "rootFlake" ])
         // {
           modules = args.modules or [ ];
-          extraModules = [ profiles.base ] ++ (args.extraModules or [ ]);
+          extraModules = [
+            profiles.base
+            {
+              omnixiah.nix.sources.system = mkDefault rootFlake.outPath;
+              system.extraDependencies = flakeLib.inputSources rootFlake;
+            }
+          ]
+          ++ (args.extraModules or [ ]);
         }
       );
     tests = import ../tests/metadata.nix;

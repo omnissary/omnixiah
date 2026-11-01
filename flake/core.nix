@@ -8,10 +8,7 @@ let
   inherit (lib) genAttrs;
 
   defaultOverlay = import ../overlays { inherit inputs; };
-  profiles = import ../profiles {
-    inherit inputs lib;
-    overlay = defaultOverlay;
-  };
+  profiles = import ../profiles { inherit inputs lib; };
   extendedLib = import ../lib {
     inherit inputs lib profiles;
   };

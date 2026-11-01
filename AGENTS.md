@@ -21,7 +21,9 @@ Any other evaluation -- a raw `import "${pkgs.path}/nixos"`, a `containers.<name
 
 Use neighboring repositories as context only: `../infra/flake.nix` supplies the corpix `nixpkgs` input, `../microvm` is the MicroVM implementation, and `../nixpkgs` is useful for source inspection. Flake inputs must use remote URLs so CI does not depend on local paths.
 
-Offline evaluation must work on installed systems. Flake input sources are part of the system configuration and must survive garbage collection. Omnixiah's base profile sets `system.extraDependencies = inputSources inputs.self;`, importing `inputSources` from `lib/flakes.nix`. Consumers set `system.extraDependencies = inputs.omnixiah.lib.flakes.inputSources self;` for their own root flake. Keep the complete input graph in this option when changing flake inputs or legacy Nix entry points.
+Offline evaluation must work on installed systems. Flake input sources are part of the system configuration and must survive garbage collection. Omnixiah's base profile retains its own input graph. Consumers pass `rootFlake = self` to `lib.nixosSystem`, which retains their complete input graph and exposes it at `/etc/omnixiah/system`.
+
+Omnixiah owns the installed system's legacy Nix paths. Keep `NIX_PATH` entries under `/etc/omnixiah` so their values stay stable across rebuilds. Consumers add flake overlays or importable overlay files through `omnixiah.nix.overlays` and source aliases through `omnixiah.nix.sources`; the profile applies the same ordered overlays to the system package set and generates the legacy overlay file. Do not set a second `nixpkgs-overlays` entry or another `/etc` source tree in consumers.
 
 ## Build, Test, and Development Commands
 

@@ -1,18 +1,45 @@
 {
   inputs,
   lib,
-  overlay,
 }:
 
 let
-  inherit (lib) mkAfter mkBefore mkDefault;
+  inherit (builtins) toJSON;
+  inherit (lib)
+    concatMapStringsSep
+    mapAttrs'
+    mkBefore
+    mkDefault
+    nameValuePair
+    ;
   inherit (import ../lib/flakes.nix) inputSources;
+  overlayFor =
+    entry:
+    if entry.flake != null then
+      entry.flake.overlays.${entry.name}
+    else
+      (import entry.path).${entry.name};
+  overlayExpression =
+    entry:
+    if entry.flake != null then
+      ''(getFlake "${entry.flake}").overlays.${toJSON entry.name}''
+    else
+      ''(import "${entry.path}").${toJSON entry.name}'';
 in
 {
   base =
-    { pkgs, ... }:
+    { config, pkgs, ... }:
     let
       inherit (pkgs) writeText;
+      cfg = config.omnixiah.nix;
+      overlaysFile = writeText "omnixiah-overlays.nix" ''
+        let
+          inherit (builtins) getFlake;
+        in
+        [
+          ${concatMapStringsSep "\n" overlayExpression cfg.overlays}
+        ]
+      '';
     in
     {
       key = "omnixiah/profiles/base";
@@ -24,17 +51,27 @@ in
       ];
       nixpkgs = {
         config.allowUnfree = mkDefault true;
-        overlays = mkBefore [ overlay ];
+        overlays = map overlayFor cfg.overlays;
       };
-      nix.nixPath = mkAfter [
-        "nixpkgs=${pkgs.path}"
-        "nixpkgs-overlays=${writeText "omnixiah-nixpkgs-overlays.nix" ''
-          let
-            inherit (builtins) getFlake;
-          in
-          [ (getFlake "${inputs.self}").overlays.default ]
-        ''}"
+      omnixiah.nix = {
+        overlays = mkBefore [ { flake = inputs.self; } ];
+        sources.omnixiah = inputs.self.outPath;
+      };
+      nix.nixPath = [
+        "nixpkgs=/etc/omnixiah/nixpkgs"
+        "nixpkgs-overlays=/etc/omnixiah/overlays.nix"
+        "/etc/omnixiah"
       ];
+      environment.etc =
+        mapAttrs' (name: source: nameValuePair "omnixiah/${name}" { inherit source; }) cfg.sources
+        // {
+          "omnixiah/nixpkgs".source = pkgs.path;
+          "omnixiah/overlays.nix".source = overlaysFile;
+        };
+      assertions = map (entry: {
+        assertion = (entry.flake != null) != (entry.path != null);
+        message = "An Omnixiah Nix overlay must specify exactly one of flake or path.";
+      }) cfg.overlays;
       system.extraDependencies = inputSources inputs.self;
     };
 

@@ -9,12 +9,10 @@ let
   inherit (builtins) filter;
   inherit (inputs.nixpkgs) lib;
   inherit (lib)
-    any
     concatStringsSep
     elem
     hasAttrByPath
     hasInfix
-    hasPrefix
     optionals
     ;
   inherit (self.lib) nixosSystem;
@@ -73,11 +71,26 @@ let
     ++ optionals (cfg.nix.settings.connect-timeout != 5) [
       "nix connect-timeout default changed"
     ]
-    ++ optionals (!(any (hasPrefix "nixpkgs=") cfg.nix.nixPath)) [
-      "Omnixiah nixpkgs source path is missing"
+    ++
+      optionals
+        (
+          cfg.nix.nixPath != [
+            "nixpkgs=/etc/omnixiah/nixpkgs"
+            "nixpkgs-overlays=/etc/omnixiah/overlays.nix"
+            "/etc/omnixiah"
+          ]
+        )
+        [
+          "Omnixiah legacy Nix paths changed"
+        ]
+    ++ optionals (!(hasAttrByPath [ "omnixiah/nixpkgs" ] cfg.environment.etc)) [
+      "Omnixiah nixpkgs source link is missing"
     ]
-    ++ optionals (!(any (hasPrefix "nixpkgs-overlays=") cfg.nix.nixPath)) [
-      "Omnixiah nixpkgs overlay path is missing"
+    ++ optionals (!(hasAttrByPath [ "omnixiah/overlays.nix" ] cfg.environment.etc)) [
+      "Omnixiah legacy overlay file is missing"
+    ]
+    ++ optionals (!(elem self.outPath cfg.system.extraDependencies)) [
+      "Omnixiah flake source is not retained"
     ]
     ++ optionals (cfg.system.nixos.distroId != "omnixiah") [
       "distribution ID changed"
