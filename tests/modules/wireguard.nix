@@ -16,6 +16,7 @@ let
   inherit (self.lib) nixosSystem;
 
   interface = {
+    privateKeyFile = "/run/keys/wg0";
     jc = 4;
     jmin = 70;
     jmax = 777;
