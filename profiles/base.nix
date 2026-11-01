@@ -34,8 +34,6 @@ in
   config = {
     system.stateVersion = mkDefault "25.11";
 
-    modules.boot.consoles = mkDefault [ "ttyS0,115200" ];
-
     networking = {
       useNetworkd = mkDefault true;
       firewall.enable = mkDefault true;

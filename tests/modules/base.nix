@@ -20,7 +20,7 @@ pkgs.omnixiah.runNixOSTest {
   testScript = ''
     start_all()
     machine.wait_for_unit("multi-user.target")
-    machine.succeed("grep -qw console=ttyS0,115200 /proc/cmdline")
+    machine.succeed("grep -qw console=tty0 /proc/cmdline")
     machine.succeed("nix --version")
     machine.succeed("nix config show > /tmp/nix-config")
     machine.succeed("grep -q '^experimental-features = .*flakes' /tmp/nix-config")

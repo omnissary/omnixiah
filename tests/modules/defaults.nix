@@ -72,7 +72,7 @@ let
       "nix connect-timeout default changed"
     ]
     ++ map (feature: "${feature} experimental feature is missing") missingExperimentalFeatures
-    ++ optionals (cfg.modules.boot.consoles != [ "ttyS0,115200" ]) [
+    ++ optionals (cfg.modules.boot.consoles != [ "tty0" ]) [
       "default boot console changed"
     ]
     ++ optionals (cfg.security.sudo.wheelNeedsPassword != true) [
