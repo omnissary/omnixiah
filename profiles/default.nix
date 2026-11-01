@@ -5,22 +5,36 @@
 }:
 
 let
-  inherit (lib) mkBefore mkDefault;
+  inherit (lib) mkAfter mkBefore mkDefault;
 in
 {
-  base = {
-    key = "omnixiah/profiles/base";
-    imports = [
-      inputs.disko.nixosModules.default
-      inputs.home-manager.nixosModules.default
-      inputs.sops.nixosModules.default
-      ./base.nix
-    ];
-    nixpkgs = {
-      config.allowUnfree = mkDefault true;
-      overlays = mkBefore [ overlay ];
+  base =
+    { pkgs, ... }:
+    let
+      inherit (pkgs) writeText;
+    in
+    {
+      key = "omnixiah/profiles/base";
+      imports = [
+        inputs.disko.nixosModules.default
+        inputs.home-manager.nixosModules.default
+        inputs.sops.nixosModules.default
+        ./base.nix
+      ];
+      nixpkgs = {
+        config.allowUnfree = mkDefault true;
+        overlays = mkBefore [ overlay ];
+      };
+      nix.nixPath = mkAfter [
+        "nixpkgs=${pkgs.path}"
+        "nixpkgs-overlays=${writeText "omnixiah-nixpkgs-overlays.nix" ''
+          let
+            inherit (builtins) getFlake;
+          in
+          [ (getFlake "${inputs.self}").overlays.default ]
+        ''}"
+      ];
     };
-  };
 
   debug = ./debug.nix;
   microvm = ./microvm.nix;

@@ -9,10 +9,12 @@ let
   inherit (builtins) filter;
   inherit (inputs.nixpkgs) lib;
   inherit (lib)
+    any
     concatStringsSep
     elem
     hasAttrByPath
     hasInfix
+    hasPrefix
     optionals
     ;
   inherit (self.lib) nixosSystem;
@@ -70,6 +72,12 @@ let
     ]
     ++ optionals (cfg.nix.settings.connect-timeout != 5) [
       "nix connect-timeout default changed"
+    ]
+    ++ optionals (!(any (hasPrefix "nixpkgs=") cfg.nix.nixPath)) [
+      "Omnixiah nixpkgs source path is missing"
+    ]
+    ++ optionals (!(any (hasPrefix "nixpkgs-overlays=") cfg.nix.nixPath)) [
+      "Omnixiah nixpkgs overlay path is missing"
     ]
     ++ optionals (cfg.system.nixos.distroId != "omnixiah") [
       "distribution ID changed"
