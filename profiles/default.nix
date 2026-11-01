@@ -6,6 +6,7 @@
 
 let
   inherit (lib) mkAfter mkBefore mkDefault;
+  inherit (import ../lib/flakes.nix) inputSources;
 in
 {
   base =
@@ -34,6 +35,7 @@ in
           [ (getFlake "${inputs.self}").overlays.default ]
         ''}"
       ];
+      system.extraDependencies = inputSources inputs.self;
     };
 
   debug = ./debug.nix;

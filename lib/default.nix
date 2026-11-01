@@ -11,6 +11,8 @@ let
     ;
   inherit (lib) concatStringsSep nixosSystem;
 
+  flakeLib = import ./flakes.nix;
+
   omnixiahLib = {
     dns = inputs.dns.lib;
     nixosSystem =
@@ -26,8 +28,11 @@ let
   };
 
   collidingLibNames = attrNames (removeAttrs (intersectAttrs lib omnixiahLib) [ "nixosSystem" ]);
+  collidingFlakeNames = attrNames (intersectAttrs lib.flakes flakeLib);
 in
-if collidingLibNames == [ ] then
-  lib // omnixiahLib
+if collidingLibNames == [ ] && collidingFlakeNames == [ ] then
+  lib // omnixiahLib // { flakes = lib.flakes // flakeLib; }
 else
-  throw "Omnixiah lib collides with nixpkgs lib: ${concatStringsSep ", " collidingLibNames}"
+  throw "Omnixiah lib collides with nixpkgs lib: ${
+    concatStringsSep ", " (collidingLibNames ++ collidingFlakeNames)
+  }"
