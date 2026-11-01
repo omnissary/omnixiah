@@ -41,6 +41,8 @@ in
 
   networking.firewall.allowedTCPPorts = mkDefault [ ];
 
+  nix.optimise.automatic = false;
+
   services.getty.autologinUser = mkDefault "root";
   users.allowNoPasswordLogin = mkDefault true;
 }
