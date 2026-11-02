@@ -3,7 +3,7 @@
 }:
 
 let
-  inherit (pkgs.lib) toUpper;
+  inherit (pkgs.lib) mkForce toUpper;
 
   loader = "BOOT${toUpper pkgs.stdenv.hostPlatform.efiArch}.EFI";
 in
@@ -13,6 +13,8 @@ pkgs.omnixiah.runNixOSTest {
   globalTimeout = 10 * 60;
 
   nodes.machine = {
+    system.extraDependencies = mkForce [ ];
+
     virtualisation = {
       useBootLoader = true;
       useEFIBoot = true;
