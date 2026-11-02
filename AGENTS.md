@@ -2,7 +2,17 @@
 
 ## Project Structure & Module Organization
 
-Omnixiah is a NixOS spin built around reusable NixOS profiles. The root `flake.nix` defines inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, and `modules`. `modules/default.nix` enumerates every file next to it, so a new shared module such as `modules/tc.nix` is registered by dropping the file in. `profiles/` contains the base, debug, MicroVM, and QEMU profile modules. The MicroVM profile is instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
+Omnixiah is a NixOS spin built around reusable NixOS profiles.
+
+- `flake.nix`: inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, and `modules`.
+- `modules/`: shared modules. `modules/default.nix` registers every file next to it, so adding `modules/tc.nix` is enough.
+- `overlays/packages/<name>/`: package overlays, one directory per package, registered the same way.
+- `profiles/`: profile modules, registered by name in `profiles/default.nix`.
+  - `base`: distribution defaults, see the layers below.
+  - `debug`, `qemu`: system profiles.
+  - `microvm`: instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
+  - `rockchip`: SoC family boot and image setup in `profiles/rockchip/default.nix`, driven by `hardware.rockchip.uBoot`.
+  - `orangepi-3b`: board profile. A board is `profiles/rockchip/<board>.nix`, imports `./.`, selects its U-Boot from `pkgs.uboot-rockchip`, and is added to `boards` in `tests/modules/rockchip.nix`.
 
 A directory is entered through its `default.nix`, and a file is named after what it is, never after the directory holding it: `modules/tc.nix`, not `modules/tc-module.nix`.
 

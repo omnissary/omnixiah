@@ -17,6 +17,9 @@
   firewall = {
     description = "Firewall module NixOS VM test";
   };
+  rockchip = {
+    description = "Rockchip board profiles evaluation test";
+  };
   tc = {
     description = "Traffic shaping module NixOS VM test";
   };

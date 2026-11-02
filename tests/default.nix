@@ -37,6 +37,13 @@
   grub = import ./modules/grub.nix {
     inherit pkgs;
   };
+  rockchip = import ./modules/rockchip.nix {
+    inherit
+      inputs
+      pkgs
+      self
+      ;
+  };
   tc = import ./modules/tc.nix {
     inherit pkgs;
   };

@@ -63,5 +63,7 @@ in
 
   debug = ./debug.nix;
   microvm = ./microvm.nix;
+  orangepi-3b = ./rockchip/orangepi-3b.nix;
   qemu = ./qemu.nix;
+  rockchip = ./rockchip;
 }
