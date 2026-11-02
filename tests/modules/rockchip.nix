@@ -25,7 +25,7 @@ let
 
   boards = {
     orangepi-3b = {
-      uBoot = boardPkgs.uboot-rockchip.uBootOrangePi3B;
+      uBoot = boardPkgs.ubootOrangePi3B;
       release = "BOARD=orangepi3b";
     };
   };

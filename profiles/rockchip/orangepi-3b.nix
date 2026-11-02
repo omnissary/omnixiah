@@ -7,7 +7,7 @@ in
 {
   imports = [ ./. ];
 
-  hardware.rockchip.uBoot = mkDefault pkgs.uboot-rockchip.uBootOrangePi3B;
+  hardware.rockchip.uBoot = mkDefault pkgs.ubootOrangePi3B;
 
   environment.etc."orangepi-release".text = "BOARD=orangepi3b";
 }

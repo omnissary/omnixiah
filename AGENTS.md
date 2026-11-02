@@ -12,7 +12,7 @@ Omnixiah is a NixOS spin built around reusable NixOS profiles.
   - `debug`, `qemu`: system profiles.
   - `microvm`: instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
   - `rockchip`: SoC family boot and image setup in `profiles/rockchip/default.nix`, driven by `hardware.rockchip.uBoot`.
-  - `orangepi-3b`: board profile. A board is `profiles/rockchip/<board>.nix`, imports `./.`, selects its U-Boot from `pkgs.uboot-rockchip`, and is added to `boards` in `tests/modules/rockchip.nix`.
+  - `orangepi-3b`: board profile. A board is `profiles/rockchip/<board>.nix`, imports `./.`, selects its U-Boot (nixpkgs `pkgs.uboot*` when available, otherwise `pkgs.uboot-rockchip`), and is added to `boards` in `tests/modules/rockchip.nix`.
 
 A directory is entered through its `default.nix`, and a file is named after what it is, never after the directory holding it: `modules/tc.nix`, not `modules/tc-module.nix`.
 
