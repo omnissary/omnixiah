@@ -65,4 +65,6 @@ Tests under `tests/modules/` should exercise module evaluation or deterministic 
 
 The current history uses concise imperative messages (`init`). Continue with short present-tense commits such as `simplify microvm profile`.
 
+Stage changes by explicit path (`git add <path>...`, `git rm <path>...`). Never use `git add -A`, `git add .`, or `git commit -a`: the working tree holds untracked local notes that must not be committed. Check `git diff --cached --stat` before every commit.
+
 Pull requests should describe the changed profile or module, list commands run, and call out host assumptions such as KVM support.
