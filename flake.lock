@@ -322,11 +322,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1793500713,
-        "narHash": "sha256-5xSntaQ87MX+FkcssGjeh44lw0O8CNMKgoWYqFKw700=",
-        "rev": "0d2fd901eaf8dc8b4350f02b333ab7c4266881db",
+        "lastModified": 1793661247,
+        "narHash": "sha256-Fh7/G1fO5Ytcf8nniwzJeVb7/A/k0woJBfMRB2cM7mY=",
+        "rev": "ffb01dc84e2c5ebbf532f0d5852764c916edbcd8",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixpkgs/archive/0d2fd901eaf8dc8b4350f02b333ab7c4266881db.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixpkgs/archive/ffb01dc84e2c5ebbf532f0d5852764c916edbcd8.tar.gz"
       },
       "original": {
         "type": "tarball",
