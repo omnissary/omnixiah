@@ -7,11 +7,10 @@
 }:
 
 let
-  inherit (lib) mkBefore mkDefault;
+  inherit (lib) mkDefault;
 
   inherit (config.hardware.rockchip) uBoot;
   inherit (config.boot.loader.generic-extlinux-compatible) populateCmd;
-  nix = config.nix.package.out;
 
   idbloaderOffset = 64;
   ubootOffset = 16384;
@@ -33,26 +32,6 @@ in
       grub.enable = false;
       generic-extlinux-compatible.enable = true;
     };
-    postBootCommands = mkBefore ''
-      if [ -f /nix-path-registration ]; then
-        set -euo pipefail
-        set -x
-        rootPart=$(${pkgs.util-linux}/bin/findmnt -n -o SOURCE /)
-        bootDevice=$(lsblk -npo PKNAME $rootPart)
-        partNum=2
-
-        echo ",+," | sfdisk -N$partNum --no-reread $bootDevice
-        ${pkgs.parted}/bin/partprobe
-        ${pkgs.e2fsprogs}/bin/resize2fs $rootPart
-
-        ${nix}/bin/nix-store --load-db < /nix-path-registration
-
-        touch /etc/NIXOS
-        ${nix}/bin/nix-env -p /nix/var/nix/profiles/system --set /run/current-system
-
-        rm -f /nix-path-registration
-      fi
-    '';
   };
 
   modules.boot.consoles = mkDefault [
@@ -62,7 +41,6 @@ in
 
   sdImage = {
     compressImage = false;
-    expandOnBoot = false;
 
     firmwarePartitionOffset = ubootOffset / 2048;
     firmwareSize = ubootSize / 2048;

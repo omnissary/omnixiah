@@ -88,6 +88,15 @@ let
       ++ optionals (elem "console=ttyAMA0,115200" cfg.boot.kernelParams) [
         "PL011 console is still configured"
       ]
+      ++ optionals (!(cfg.systemd.services ? expand-root-partition)) [
+        "root partition is not expanded on first boot"
+      ]
+      ++ optionals (!hasInfix "PARTN" (cfg.systemd.services.expand-root-partition.script or "")) [
+        "root partition number is not read from PARTN"
+      ]
+      ++ optionals (cfg.boot.postBootCommands != "") [
+        "first boot is handled outside the sd-image services"
+      ]
       ++ optionals cfg.boot.loader.grub.enable [
         "GRUB is enabled"
       ]
