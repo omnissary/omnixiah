@@ -44,6 +44,26 @@ let
     ];
   };
 
+  removableEvaluated = nixosSystem {
+    inherit system;
+    specialArgs = {
+      inherit self;
+    };
+    modules = [
+      {
+        networking.hostName = "defaults-removable";
+        boot.loader = {
+          efi.canTouchEfiVariables = false;
+          grub = {
+            efiSupport = true;
+            efiInstallAsRemovable = true;
+            device = "nodev";
+          };
+        };
+      }
+    ];
+  };
+
   hasEfibootmgr =
     configuration:
     any (package: (package.pname or null) == "efibootmgr") configuration.environment.systemPackages;
@@ -145,6 +165,12 @@ let
     ]
     ++ optionals (!hasEfibootmgr efiEvaluated.config) [
       "efibootmgr is missing with an EFI boot loader"
+    ]
+    ++ optionals cfg.boot.loader.grub.efiRemovableBootOrder.enable [
+      "GRUB EFI BootOrder enforcement is enabled without removable GRUB"
+    ]
+    ++ optionals (!removableEvaluated.config.boot.loader.grub.efiRemovableBootOrder.enable) [
+      "GRUB EFI BootOrder enforcement is disabled with removable GRUB"
     ];
 in
 

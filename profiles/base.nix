@@ -76,6 +76,10 @@ in
 
     programs.command-not-found.enable = mkDefault false;
 
+    boot.loader.grub.efiRemovableBootOrder.enable = mkDefault (
+      grub.enable && grub.efiSupport && grub.efiInstallAsRemovable
+    );
+
     environment.systemPackages = [
       coreutils
       iproute2
