@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   ...
@@ -9,16 +10,30 @@ let
   inherit (lib)
     mkDefault
     mkOption
+    optional
     types
     ;
   inherit (pkgs)
     coreutils
+    efibootmgr
     iproute2
     iputils
     procps
     util-linux
     vim
     ;
+  inherit (config.boot.loader)
+    grub
+    limine
+    refind
+    systemd-boot
+    ;
+
+  efi =
+    (grub.enable && grub.efiSupport)
+    || (limine.enable && limine.efiSupport)
+    || refind.enable
+    || systemd-boot.enable;
 in
 
 {
@@ -68,6 +83,7 @@ in
       procps
       util-linux
       vim
-    ];
+    ]
+    ++ optional efi efibootmgr;
   };
 }

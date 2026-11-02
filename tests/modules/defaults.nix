@@ -6,7 +6,7 @@
 }:
 
 let
-  inherit (builtins) filter;
+  inherit (builtins) any filter;
   inherit (inputs.nixpkgs) lib;
   inherit (lib)
     concatStringsSep
@@ -30,6 +30,23 @@ let
   };
   inherit (evaluated) config options;
   cfg = config;
+
+  efiEvaluated = nixosSystem {
+    inherit system;
+    specialArgs = {
+      inherit self;
+    };
+    modules = [
+      {
+        networking.hostName = "defaults-efi";
+        boot.loader.systemd-boot.enable = true;
+      }
+    ];
+  };
+
+  hasEfibootmgr =
+    configuration:
+    any (package: (package.pname or null) == "efibootmgr") configuration.environment.systemPackages;
 
   experimentalFeatures = cfg.nix.settings.experimental-features;
   requiredExperimentalFeatures = [
@@ -122,6 +139,12 @@ let
     ]
     ++ optionals (cfg.services.journald.settings.Journal.SystemMaxUse != "256M") [
       "journald size default changed"
+    ]
+    ++ optionals (hasEfibootmgr cfg) [
+      "efibootmgr is installed without an EFI boot loader"
+    ]
+    ++ optionals (!hasEfibootmgr efiEvaluated.config) [
+      "efibootmgr is missing with an EFI boot loader"
     ];
 in
 
