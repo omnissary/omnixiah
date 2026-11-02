@@ -55,6 +55,11 @@ in
     '';
   };
 
+  modules.boot.consoles = mkDefault [
+    "ttyS2,1500000"
+    "tty0"
+  ];
+
   sdImage = {
     compressImage = false;
     expandOnBoot = false;

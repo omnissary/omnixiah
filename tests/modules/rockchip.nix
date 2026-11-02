@@ -82,6 +82,12 @@ let
       ++ optionals ((kernel.structuredExtraConfig.ARCH_ROCKCHIP or null) == null) [
         "Rockchip kernel config is missing"
       ]
+      ++ optionals (!elem "console=ttyS2,1500000" cfg.boot.kernelParams) [
+        "serial console is not ttyS2 at 1500000 baud"
+      ]
+      ++ optionals (elem "console=ttyAMA0,115200" cfg.boot.kernelParams) [
+        "PL011 console is still configured"
+      ]
       ++ optionals cfg.boot.loader.grub.enable [
         "GRUB is enabled"
       ]
