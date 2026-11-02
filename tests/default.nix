@@ -34,6 +34,9 @@
   firewall = import ./modules/firewall.nix {
     inherit pkgs;
   };
+  grub = import ./modules/grub.nix {
+    inherit pkgs;
+  };
   tc = import ./modules/tc.nix {
     inherit pkgs;
   };
