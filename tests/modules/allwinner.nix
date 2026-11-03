@@ -154,6 +154,9 @@ let
       ++ optionals (!cfg.boot.tmp.useTmpfs) [
         "/tmp is on flash"
       ]
+      ++ optionals cfg.services.fwupd.enable [
+        "fwupd is enabled on a board without UEFI or LVFS devices"
+      ]
       ++ optionals cfg.nix.optimise.automatic [
         "nix-optimise rewrites the store on flash daily"
       ]

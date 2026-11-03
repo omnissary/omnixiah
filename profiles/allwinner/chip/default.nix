@@ -69,6 +69,8 @@ in
 
   nix.optimise.automatic = mkOverride 900 false;
 
+  services.fwupd.enable = mkOverride 900 false;
+
   system.tools.nixos-generate-config.enable = mkDefault false;
 
   zramSwap.enable = mkDefault true;
