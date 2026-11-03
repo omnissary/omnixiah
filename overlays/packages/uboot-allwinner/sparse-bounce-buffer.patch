@@ -1,0 +1,27 @@
+Subject: [PATCH] sparse: bound the raw chunk bounce buffer
+
+write_sparse_chunk_raw() allocates FASTBOOT_MAX_BLK_WRITE storage blocks
+for its aligned copy. On NAND the block is a page, so with 16 KiB pages
+that is 256 MiB, more than the malloc pool; the allocation fails and the
+whole sparse write is aborted with only a fastboot reply. Size the
+buffer like the fill buffer, from CONFIG_IMAGE_SPARSE_FILLBUF_SIZE.
+
+---
+ lib/image-sparse.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/lib/image-sparse.c b/lib/image-sparse.c
+index 09225692e9b..1a7c5bf6d8c 100644
+--- a/lib/image-sparse.c
++++ b/lib/image-sparse.c
+@@ -55,7 +55,9 @@ static lbaint_t write_sparse_chunk_raw(struct sparse_storage *info,
+ 				       char *response)
+ {
+ 	lbaint_t n = blkcnt, write_blks, blks = 0;
+-	lbaint_t aligned_buf_blks = FASTBOOT_MAX_BLK_WRITE;
++	lbaint_t aligned_buf_blks = clamp_t(lbaint_t,
++					    CONFIG_IMAGE_SPARSE_FILLBUF_SIZE / info->blksz,
++					    1, FASTBOOT_MAX_BLK_WRITE);
+ 	uint32_t *aligned_buf = NULL;
+ 
+ 	if (CONFIG_IS_ENABLED(SYS_DCACHE_OFF)) {

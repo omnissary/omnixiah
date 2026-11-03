@@ -29,6 +29,7 @@ _final: prev: {
         extraPatches = [
           ./chip-nand-slc-emulation.patch
           ./chip-fastboot-nand-slc.patch
+          ./sparse-bounce-buffer.patch
           ./chip-nand-spl-dma.patch
           ./chip-w1-read-address.patch
         ];
