@@ -79,6 +79,9 @@ let
       ++ optionals (kernel.drvPath != boardPkgs.linuxPackages_rockchip.kernel.drvPath) [
         "Rockchip kernel is not the default"
       ]
+      ++ optionals (cfg.hardware.enableAllHardware || cfg.hardware.enableRedistributableFirmware) [
+        "sd-image pulls in all hardware support and redistributable firmware"
+      ]
       ++ optionals (kernel.version != boardPkgs.linuxPackages.kernel.version) [
         "Rockchip kernel does not follow the Omnixiah kernel version"
       ]
