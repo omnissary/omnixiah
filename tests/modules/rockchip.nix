@@ -20,28 +20,32 @@ let
     ;
   inherit (self.lib) nixosSystem;
 
-  system = "aarch64-linux";
-  boardPkgs = self.pkgs.${system};
+  hostPlatform = "aarch64-linux";
 
   boards = {
     orangepi-3b = {
-      uBoot = boardPkgs.ubootOrangePi3B;
+      uBoot = "ubootOrangePi3B";
       release = "BOARD=orangepi3b";
     };
   };
 
   evaluate =
     name: _:
-    (nixosSystem {
-      inherit system;
+    nixosSystem {
       specialArgs = {
         inherit self;
       };
       modules = [
         self.profiles.${name}
-        { networking.hostName = name; }
+        {
+          networking.hostName = name;
+          nixpkgs = {
+            inherit hostPlatform;
+            buildPlatform = pkgs.stdenv.buildPlatform.system;
+          };
+        }
       ];
-    }).config;
+    };
 
   evaluated = mapAttrs evaluate boards;
 
@@ -49,16 +53,18 @@ let
     name:
     let
       board = boards.${name};
-      cfg = evaluated.${name};
+      cfg = evaluated.${name}.config;
+      boardPkgs = evaluated.${name}.pkgs;
+      uBoot = boardPkgs.${board.uBoot};
       inherit (cfg.boot.kernelPackages) kernel;
       patches = map (patch: patch.name) kernel.kernelPatches;
       postBuild = unsafeDiscardStringContext cfg.sdImage.postBuildCommands;
     in
     map (error: "${name}: ${error}") (
-      optionals (cfg.hardware.rockchip.uBoot.drvPath != board.uBoot.drvPath) [
+      optionals (cfg.hardware.rockchip.uBoot.drvPath != uBoot.drvPath) [
         "board U-Boot is not selected"
       ]
-      ++ optionals (!hasInfix (unsafeDiscardStringContext board.uBoot.outPath) postBuild) [
+      ++ optionals (!hasInfix (unsafeDiscardStringContext uBoot.outPath) postBuild) [
         "image does not embed the board U-Boot"
       ]
       ++ optionals (!hasInfix "seek=32768" postBuild) [
