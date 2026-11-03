@@ -8,7 +8,11 @@ _final: prev: {
         rev = "a81284783cdfab89a68a630b4abce9e14424f931";
         hash = "sha256-9fOqP2MaofzpE7b5+RdtCAdJJfHZrA7mexFDPIBA9Lg=";
       };
-      inherit (oldAttrs.passthru) mkSubProject;
+      mkSubProject =
+        args:
+        (oldAttrs.passthru.mkSubProject args).overrideAttrs (old: {
+          makeFlags = old.makeFlags ++ [ "CC=${prev.stdenv.cc.targetPrefix}cc" ];
+        });
       wiringPi = mkSubProject {
         subprj = "wiringPi";
         src = srcAll;
