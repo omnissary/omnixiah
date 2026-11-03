@@ -42,8 +42,6 @@ let
     uBoot = "0x48000000";
   };
 
-  fastbootVendor = "0x1f3a";
-
   # The rootfs partition in nand.dts is sized for the 8 GB Hynix part. On the
   # 4 GB Toshiba part the kernel truncates it with a warning, and the
   # autoresize volume below grows to whatever UBI attaches.
@@ -122,7 +120,7 @@ let
   nandFlash = writeShellScript "chip-nand-flash" ''
     set -euo pipefail
     image=${nandImage}
-    fastboot=(${android-tools}/bin/fastboot -i ${fastbootVendor})
+    fastboot=${android-tools}/bin/fastboot
 
     echo "connect the CHIP micro-USB port with FEL jumpered to GND"
     until ${sunxi-tools}/bin/sunxi-fel ver >/dev/null 2>&1; do sleep 0.5; done
@@ -134,10 +132,10 @@ let
       write ${address.uBoot} "$image/u-boot.nand"
 
     echo "waiting for fastboot"
-    until [ -n "$("''${fastboot[@]}" devices 2>/dev/null)" ]; do sleep 0.5; done
-    "''${fastboot[@]}" flash rootfs "$image/rootfs.ubi.sparse"
-    "''${fastboot[@]}" reboot
-    echo "done, remove the FEL jumper"
+    until [ -n "$("$fastboot" devices)" ]; do sleep 0.5; done
+    echo "remove the FEL jumper now, the CHIP reboots into NAND after flashing"
+    "$fastboot" flash rootfs "$image/rootfs.ubi.sparse"
+    "$fastboot" reboot
   '';
 in
 
