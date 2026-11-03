@@ -1,0 +1,37 @@
+Subject: [PATCH] sparse: treat negative write results as errors
+
+The write callbacks return negative errno values in an unsigned lbaint_t,
+which compared as a large block count and was taken as success: the
+failed range was skipped backwards and writing continued. Check
+IS_ERR_VALUE() before comparing the count.
+
+---
+--- a/lib/image-sparse.c
++++ b/lib/image-sparse.c
+@@ -62,7 +62,7 @@
+ 
+ 	if (CONFIG_IS_ENABLED(SYS_DCACHE_OFF)) {
+ 		write_blks = info->write(info, blk, n, data);
+-		if (write_blks < n)
++		if (IS_ERR_VALUE(write_blks) || write_blks < n)
+ 			goto write_fail;
+ 
+ 		return write_blks;
+@@ -80,7 +80,7 @@
+ 
+ 		/* write_blks might be > n due to NAND bad-blocks */
+ 		write_blks = info->write(info, blk + blks, n, aligned_buf);
+-		if (write_blks < n) {
++		if (IS_ERR_VALUE(write_blks) || write_blks < n) {
+ 			free(aligned_buf);
+ 			goto write_fail;
+ 		}
+@@ -264,7 +264,7 @@
+ 					j = fill_buf_num_blks;
+ 				blks = info->write(info, blk, j, fill_buf);
+ 				/* blks might be > j (eg. NAND bad-blocks) */
+-				if (blks < j) {
++				if (IS_ERR_VALUE(blks) || blks < j) {
+ 					printf("%s: %s " LBAFU " [%d]\n",
+ 					       __func__,
+ 					       "Write failed, block #",

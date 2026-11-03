@@ -1,0 +1,64 @@
+Subject: [PATCH] fastboot: nand: skip bad blocks when reserving sparse blocks
+
+fb_nand_sparse_reserve() returned the requested count without looking at
+bad blocks. The fastboot host sends a large image as several sparse
+images whose leading DONT_CARE chunk covers the data already written, so
+after a bad block every later chunk started too early and overwrote
+programmed pages. Walk the erase blocks and skip bad ones, matching
+nand_write_skip_bad().
+
+---
+--- a/drivers/fastboot/fb_nand.c
++++ b/drivers/fastboot/fb_nand.c
+@@ -6,6 +6,7 @@
+ 
+ #include <config.h>
+ #include <blk.h>
++#include <linux/math64.h>
+ 
+ #include <fastboot.h>
+ #include <image-sparse.h>
+@@ -166,20 +167,32 @@
+ static lbaint_t fb_nand_sparse_reserve(struct sparse_storage *info,
+ 		lbaint_t blk, lbaint_t blkcnt)
+ {
+-	int bad_blocks = 0;
+-
+-/*
+- * TODO - implement a function to determine the total number
+- * of blocks which must be used in order to reserve the specified
+- * number ("blkcnt") of "good-blocks", starting at "blk"...
+- * ( possibly something like the "check_skip_len()" function )
+- */
++	struct fb_nand_sparse *sparse = info->priv;
++	struct mtd_info *mtd = sparse->mtd;
++	loff_t start = (loff_t)blk * info->blksz;
++	loff_t end = sparse->part->offset + sparse->part->size;
++	loff_t left = (loff_t)blkcnt * info->blksz;
++	loff_t offset = start;
+ 
+ 	/*
+-	 * the return value must be 'blkcnt' ("good-blocks") plus the
+-	 * number of "bad-blocks" encountered within this space...
++	 * Return the number of blocks spanned by 'blkcnt' good blocks
++	 * starting at 'blk', so that the next chunk lands where
++	 * nand_write_skip_bad() would have continued.
+ 	 */
+-	return blkcnt + bad_blocks;
++	while (left > 0 && offset < end) {
++		loff_t block = offset & ~(loff_t)(mtd->erasesize - 1);
++		loff_t len = min_t(loff_t, block + mtd->erasesize - offset, left);
++
++		if (nand_block_isbad(mtd, block)) {
++			offset = block + mtd->erasesize;
++			continue;
++		}
++
++		offset += len;
++		left -= len;
++	}
++
++	return div_u64(offset - start, info->blksz);
+ }
+ 
+ /**

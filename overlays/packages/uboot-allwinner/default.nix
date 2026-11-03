@@ -30,6 +30,8 @@ _final: prev: {
           ./chip-nand-slc-emulation.patch
           ./chip-fastboot-nand-slc.patch
           ./sparse-bounce-buffer.patch
+          ./sparse-write-errors.patch
+          ./fastboot-nand-sparse-reserve.patch
           ./chip-nand-spl-dma.patch
           ./chip-w1-read-address.patch
         ];
