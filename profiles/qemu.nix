@@ -5,7 +5,7 @@
 }:
 
 let
-  inherit (lib) mkForce;
+  inherit (lib) mkForce mkOverride;
 in
 
 {
@@ -31,6 +31,8 @@ in
   boot.kernelParams = [
     "console=tty1"
   ];
+
+  services.fwupd.enable = mkOverride 900 false;
 
   networking.usePredictableInterfaceNames = false;
   networking.dhcpcd.allowInterfaces = [ "eth*" ];
