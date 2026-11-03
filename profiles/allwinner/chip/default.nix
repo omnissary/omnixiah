@@ -6,7 +6,7 @@
 }:
 
 let
-  inherit (lib) mkDefault;
+  inherit (lib) mkDefault mkOverride;
 
   nand = config.hardware.allwinner.chip.storage == "nand";
 
@@ -59,6 +59,15 @@ in
     HandlePowerKey = mkDefault "ignore";
     HandlePowerKeyLongPress = mkDefault "ignore";
   };
+
+  services.journald.settings.Journal = {
+    Storage = mkDefault "volatile";
+    RuntimeMaxUse = mkDefault "16M";
+  };
+
+  boot.tmp.useTmpfs = mkDefault true;
+
+  nix.optimise.automatic = mkOverride 900 false;
 
   system.tools.nixos-generate-config.enable = mkDefault false;
 

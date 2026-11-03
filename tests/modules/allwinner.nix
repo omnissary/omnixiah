@@ -148,6 +148,15 @@ let
       ++ optionals (!any (package: (package.name or "") == "rtl8723bs-firmware") firmware) [
         "RTL8723BS firmware is not installed"
       ]
+      ++ optionals (cfg.services.journald.settings.Journal.Storage != "volatile") [
+        "journald writes the journal to flash"
+      ]
+      ++ optionals (!cfg.boot.tmp.useTmpfs) [
+        "/tmp is on flash"
+      ]
+      ++ optionals cfg.nix.optimise.automatic [
+        "nix-optimise rewrites the store on flash daily"
+      ]
       ++ optionals (cfg.hardware.enableAllHardware || cfg.hardware.enableRedistributableFirmware) [
         "sd-image pulls in all hardware support and redistributable firmware"
       ]
