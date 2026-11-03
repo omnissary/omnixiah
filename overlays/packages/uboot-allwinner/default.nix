@@ -28,6 +28,7 @@ _final: prev: {
       uBootCHIPNand = buildSun5iUBoot "CHIP_defconfig" {
         extraPatches = [
           ./chip-nand-slc-emulation.patch
+          ./chip-fastboot-nand-slc.patch
           ./chip-nand-spl-dma.patch
           ./chip-w1-read-address.patch
         ];

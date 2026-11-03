@@ -1,0 +1,73 @@
+Subject: [PATCH] fastboot: nand: write slc partitions through their MTD device
+
+fb_nand writes through the whole-chip NAND device, which addresses the
+MLC NAND in MLC mode. A partition marked slc in mtdparts uses SLC
+emulation, so data written that way is unreadable when the partition is
+later attached in SLC mode. Look up the partition's own MTD device and,
+when it is SLC-emulated, use it with partition-relative offsets.
+
+---
+ drivers/fastboot/fb_nand.c | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/drivers/fastboot/fb_nand.c b/drivers/fastboot/fb_nand.c
+index 6df3917e129..33a469c99ee 100644
+--- a/drivers/fastboot/fb_nand.c
++++ b/drivers/fastboot/fb_nand.c
+@@ -13,6 +13,8 @@
+ #include <linux/printk.h>
+ #include <linux/mtd/mtd.h>
+ #include <jffs2/jffs2.h>
++#include <linux/err.h>
++#include <mtd.h>
+ #include <nand.h>
+ 
+ struct fb_nand_sparse {
+@@ -30,6 +32,39 @@ __weak int board_fastboot_write_partition_setup(char *name)
+ 	return 0;
+ }
+ 
++static struct part_info fb_nand_slc_part;
++
++/*
++ * The NAND device addresses the whole chip in MLC mode. A partition marked
++ * slc in mtdparts is only consistent when accessed through its own MTD
++ * device, which applies the SLC emulation, so switch to that device and to
++ * offsets relative to the partition.
++ */
++static void fb_nand_use_slc_part(struct mtd_info **mtd,
++				 struct part_info **part)
++{
++	struct mtd_info *slc;
++
++	if (mtd_probe_devices())
++		return;
++
++	slc = get_mtd_device_nm((*part)->name);
++	if (IS_ERR_OR_NULL(slc))
++		return;
++
++	if (!(slc->flags & MTD_SLC_ON_MLC_EMULATION)) {
++		put_mtd_device(slc);
++		return;
++	}
++
++	fb_nand_slc_part = **part;
++	fb_nand_slc_part.offset = 0;
++	fb_nand_slc_part.size = slc->size;
++
++	*mtd = slc;
++	*part = &fb_nand_slc_part;
++}
++
+ static int fb_nand_lookup(const char *partname,
+ 			  struct mtd_info **mtd,
+ 			  struct part_info **part,
+@@ -61,6 +96,7 @@ static int fb_nand_lookup(const char *partname,
+ 	}
+ 
+ 	*mtd = get_nand_dev_by_index(dev->id->num);
++	fb_nand_use_slc_part(mtd, part);
+ 
+ 	return 0;
+ }
