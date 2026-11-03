@@ -15,6 +15,8 @@ let
 in
 
 {
+  # sd-image.nix forces hardware.enableAllHardware, which bloats the initrd;
+  # profiles/rockchip has the same problem.
   imports = [
     "${modulesPath}/installer/sd-card/sd-image.nix"
   ];

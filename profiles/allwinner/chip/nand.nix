@@ -44,6 +44,9 @@ let
 
   fastbootVendor = "0x1f3a";
 
+  # The rootfs partition in nand.dts is sized for the 8 GB Hynix part. On the
+  # 4 GB Toshiba part the kernel truncates it with a warning, and the
+  # autoresize volume below grows to whatever UBI attaches.
   ubinizeConfig = writeText "ubinize.cfg" ''
     [rootfs]
     mode=ubi
@@ -70,6 +73,8 @@ let
     fastboot usb 0
   '';
 
+  # Not bit-reproducible: sunxi-nand-image-builder fills the unused part of
+  # every page from /dev/urandom, which is intended for MLC NAND.
   nandImage =
     pkgs.runCommand "chip-nand-image"
       {

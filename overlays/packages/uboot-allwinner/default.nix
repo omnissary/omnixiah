@@ -21,6 +21,9 @@ _final: prev: {
     {
       uBootCHIP = buildSun5iUBoot "CHIP_defconfig" { };
 
+      # Untested on hardware: reading the MLC NAND from this build, and the
+      # on-flash bad block table agreeing with the kernel (nand-on-flash-bbt
+      # in profiles/allwinner/chip/nand.dts), are taken from x-chip-uboot.
       uBootCHIPNand = buildSun5iUBoot "CHIP_defconfig" {
         version = "2022.01";
         src = fetchFromGitHub {
