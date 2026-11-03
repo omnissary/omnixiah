@@ -18,6 +18,7 @@ let
     concatStringsSep
     hasInfix
     mapAttrs
+    mkDefault
     optionals
     sort
     ;
@@ -66,6 +67,10 @@ let
         {
           hardware.allwinner.chip.storage = board.storage;
           networking.hostName = name;
+          hardware = {
+            enableAllFirmware = mkDefault true;
+            enableRedistributableFirmware = mkDefault true;
+          };
           users.allowNoPasswordLogin = true;
           nixpkgs = {
             inherit hostPlatform;
@@ -160,9 +165,16 @@ let
       ++ optionals cfg.nix.optimise.automatic [
         "nix-optimise rewrites the store on flash daily"
       ]
-      ++ optionals (cfg.hardware.enableAllHardware || cfg.hardware.enableRedistributableFirmware) [
-        "sd-image pulls in all hardware support and redistributable firmware"
-      ]
+      ++
+        optionals
+          (
+            cfg.hardware.enableAllHardware
+            || cfg.hardware.enableAllFirmware
+            || cfg.hardware.enableRedistributableFirmware
+          )
+          [
+            "sd-image pulls in all hardware support and redistributable firmware"
+          ]
       ++ optionals (cfg.networking.networkmanager.wifi.macAddress != "permanent") [
         "NetworkManager randomizes the RTL8723BS MAC address"
       ]

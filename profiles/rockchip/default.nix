@@ -7,7 +7,7 @@
 }:
 
 let
-  inherit (lib) mkDefault mkForce;
+  inherit (lib) mkDefault mkForce mkOverride;
 
   inherit (config.hardware.rockchip) uBoot;
   inherit (config.boot.loader.generic-extlinux-compatible) populateCmd;
@@ -34,7 +34,11 @@ in
     };
   };
 
-  hardware.enableAllHardware = mkForce false;
+  hardware = {
+    enableAllHardware = mkForce false;
+    enableAllFirmware = mkOverride 900 false;
+    enableRedistributableFirmware = mkOverride 900 false;
+  };
 
   modules.boot.consoles = mkDefault [
     "ttyS2,1500000"

@@ -16,6 +16,7 @@ let
     concatStringsSep
     hasInfix
     mapAttrs
+    mkDefault
     optionals
     ;
   inherit (self.lib) nixosSystem;
@@ -39,6 +40,10 @@ let
         self.profiles.${name}
         {
           networking.hostName = name;
+          hardware = {
+            enableAllFirmware = mkDefault true;
+            enableRedistributableFirmware = mkDefault true;
+          };
           nixpkgs = {
             inherit hostPlatform;
             buildPlatform = pkgs.stdenv.buildPlatform.system;
@@ -79,9 +84,16 @@ let
       ++ optionals (kernel.drvPath != boardPkgs.linuxPackages_rockchip.kernel.drvPath) [
         "Rockchip kernel is not the default"
       ]
-      ++ optionals (cfg.hardware.enableAllHardware || cfg.hardware.enableRedistributableFirmware) [
-        "sd-image pulls in all hardware support and redistributable firmware"
-      ]
+      ++
+        optionals
+          (
+            cfg.hardware.enableAllHardware
+            || cfg.hardware.enableAllFirmware
+            || cfg.hardware.enableRedistributableFirmware
+          )
+          [
+            "sd-image pulls in all hardware support and redistributable firmware"
+          ]
       ++ optionals (kernel.version != boardPkgs.linuxPackages.kernel.version) [
         "Rockchip kernel does not follow the Omnixiah kernel version"
       ]
