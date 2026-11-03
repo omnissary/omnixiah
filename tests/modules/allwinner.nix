@@ -10,6 +10,7 @@ let
     concatLists
     concatMap
     elem
+    lessThan
     unsafeDiscardStringContext
     ;
   inherit (pkgs) lib;
@@ -18,6 +19,7 @@ let
     hasInfix
     mapAttrs
     optionals
+    sort
     ;
   inherit (self.lib) nixosSystem;
 
@@ -25,29 +27,46 @@ let
 
   boards = {
     chip = {
+      profile = "chip";
+      storage = "usb";
       uBootDefconfig = "CHIP_defconfig";
       dtb = "allwinner/sun5i-r8-chip.dtb";
       overlays = [ ];
       pocketchip = false;
     };
     pocketchip = {
+      profile = "pocketchip";
+      storage = "usb";
       uBootDefconfig = "CHIP_defconfig";
       dtb = "allwinner/sun5i-r8-chip.dtb";
       overlays = [ "pocketchip" ];
       pocketchip = true;
     };
+    pocketchip-nand = {
+      profile = "pocketchip";
+      storage = "nand";
+      uBootDefconfig = "CHIP_defconfig";
+      dtb = "allwinner/sun5i-r8-chip.dtb";
+      overlays = [
+        "chip-nand"
+        "pocketchip"
+      ];
+      pocketchip = true;
+    };
   };
 
   evaluate =
-    name: _:
+    name: board:
     nixosSystem {
       specialArgs = {
         inherit self;
       };
       modules = [
-        self.profiles.${name}
+        self.profiles.${board.profile}
         {
+          hardware.allwinner.chip.storage = board.storage;
           networking.hostName = name;
+          users.allowNoPasswordLogin = true;
           nixpkgs = {
             inherit hostPlatform;
             buildPlatform = pkgs.stdenv.buildPlatform.system;
@@ -75,6 +94,8 @@ let
       touchCalibrated =
         hasInfix ''DRIVERS=="sun4i-ts"'' udevRules && hasInfix "LIBINPUT_CALIBRATION_MATRIX" udevRules;
       xkbPocketchip = cfg.services.xserver.xkb.extraLayouts ? pocketchip;
+      nand = board.storage == "nand";
+      nandFlash = unsafeDiscardStringContext (cfg.system.build.nandFlash.text or "");
     in
     map (error: "${name}: ${error}") (
       optionals ((uBoot.defconfig or null) != board.uBootDefconfig) [
@@ -92,9 +113,12 @@ let
       ++ optionals (cfg.hardware.deviceTree.name != board.dtb) [
         "device tree is not ${board.dtb}"
       ]
-      ++ optionals (map (overlay: overlay.name) cfg.hardware.deviceTree.overlays != board.overlays) [
-        "device tree overlays changed"
-      ]
+      ++
+        optionals
+          (sort lessThan (map (overlay: overlay.name) cfg.hardware.deviceTree.overlays) != board.overlays)
+          [
+            "device tree overlays changed"
+          ]
       ++ optionals (!elem "console=ttyS0,115200" cfg.boot.kernelParams) [
         "serial console is not ttyS0 at 115200 baud"
       ]
@@ -148,6 +172,27 @@ let
           [
             "battery critical level does not power off"
           ]
+      ++ optionals ((kernel.structuredExtraConfig.MTD_NAND_SUNXI or null) == null) [
+        "kernel cannot attach the NAND before the initrd mounts the root"
+      ]
+      ++ optionals (nand != (uBoot.version == "2022.01")) [
+        "U-Boot does not match the root storage"
+      ]
+      ++ optionals (nand != elem "ubi.mtd=rootfs" cfg.boot.kernelParams) [
+        "UBI attach parameter does not match the root storage"
+      ]
+      ++ optionals (nand != (cfg.fileSystems."/".fsType == "ubifs")) [
+        "root filesystem does not match the root storage"
+      ]
+      ++ optionals (nand && cfg.sdImage.expandOnBoot) [
+        "first boot tries to grow a partition on UBI"
+      ]
+      ++ optionals (nand != (cfg.systemd.services ? ubihealthd)) [
+        "NAND health watchdog does not match the root storage"
+      ]
+      ++ optionals (nand && !(hasInfix "sunxi-fel" nandFlash && hasInfix "flash rootfs" nandFlash)) [
+        "NAND flasher does not load U-Boot over FEL and flash the root over fastboot"
+      ]
       ++ optionals cfg.boot.loader.grub.enable [
         "GRUB is enabled"
       ]

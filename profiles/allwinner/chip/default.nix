@@ -1,7 +1,14 @@
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   inherit (lib) mkDefault;
+
+  nand = config.hardware.allwinner.chip.storage == "nand";
 
   rtl8723bsFirmware = pkgs.runCommand "rtl8723bs-firmware" { } ''
     mkdir -p $out/lib/firmware/rtlwifi $out/lib/firmware/rtl_bt
@@ -11,10 +18,15 @@ let
 in
 
 {
-  imports = [ ../. ];
+  imports = [
+    ../.
+    ./nand.nix
+  ];
 
   hardware = {
-    allwinner.uBoot = mkDefault pkgs.uboot-allwinner.uBootCHIP;
+    allwinner.uBoot = mkDefault (
+      if nand then pkgs.uboot-allwinner.uBootCHIPNand else pkgs.uboot-allwinner.uBootCHIP
+    );
     deviceTree = {
       name = "allwinner/sun5i-r8-chip.dtb";
       filter = "sun5i-r8-chip.dtb";

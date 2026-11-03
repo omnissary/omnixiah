@@ -1,0 +1,66 @@
+From: CHIP Builder <chip@localhost>
+Subject: [PATCH] cmd: w1: read: optional destination address (for boot scripts)
+
+`w1 read` could only print the EEPROM bytes to the console (and with "%x",
+so leading zeros were dropped -- making fixed-width fields like a DIP header's
+VID/PID unparseable). u-boot's hush has no command substitution, so a boot
+script can't capture that output.
+
+Add an optional <addr> argument (mirroring `i2c read ... <memaddr>`): with it,
+the bytes are copied to that memory address so a script can `md`/`itest`/`fdt`
+them; without it, dump to the console as before (now "%02x"). Used to read a
+CHIP DIP's DS24xx ID EEPROM in the NAND boot script and pick a DT overlay.
+
+Signed-off-by: CHIP Builder <chip@localhost>
+---
+ cmd/w1.c | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+--- a/cmd/w1.c
++++ b/cmd/w1.c
+@@ -9,6 +9,7 @@
+ #include <dm.h>
+ #include <w1.h>
+ #include <w1-eeprom.h>
++#include <mapmem.h>
+ #include <dm/device-internal.h>
+
+ static int w1_bus(void)
+@@ -97,9 +98,18 @@ static int w1_read(int argc, char *const argv[])
+ 		return CMD_RET_FAILURE;
+ 	}
+
+-	for (i = 0; i < len; i++)
+-		printf("%x", buf[i]);
+-	printf("\n");
++	if (argc > 6) {
++		ulong addr = hextoul(argv[6], NULL);
++		void *dst = map_sysmem(addr, len);
++
++		memcpy(dst, buf, len);
++		unmap_sysmem(dst);
++		printf("%d bytes read to 0x%lx\n", len, addr);
++	} else {
++		for (i = 0; i < len; i++)
++			printf("%02x", buf[i]);
++		printf("\n");
++	}
+
+ 	return CMD_RET_SUCCESS;
+ }
+@@ -118,10 +128,12 @@ int do_w1(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+ 	return CMD_RET_SUCCESS;
+ }
+
+-U_BOOT_CMD(w1, 6, 0, do_w1,
++U_BOOT_CMD(w1, 7, 0, do_w1,
+ 	   "onewire interface utility commands",
+ 	   "bus - show onewire bus info (all)\n"
+-	   "w1 read [<bus> [<dev> [offset [length]]]]"
++	   "w1 read [<bus> [<dev> [offset [length [addr]]]]]"
+ 	   "    - read from onewire device 'dev' on onewire bus 'bus'"
+-	   " starting from offset 'offset' and length 'length'\n"
++	   " starting from offset 'offset' and length 'length'.\n"
++	   "      with 'addr', copy the bytes to that memory address instead of\n"
++	   "      printing them (for fdt/itest use in a boot script).\n"
+ 	   "      defaults: bus 0, dev 0, offset 0, length 512 bytes.");

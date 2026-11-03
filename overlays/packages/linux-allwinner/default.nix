@@ -4,6 +4,7 @@ let
 
   structuredExtraConfig = {
     BT_HCIUART_RTL = yes;
+    MTD_NAND_SUNXI = yes;
   };
 in
 {
