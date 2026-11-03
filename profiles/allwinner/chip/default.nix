@@ -60,5 +60,7 @@ in
     HandlePowerKeyLongPress = mkDefault "ignore";
   };
 
+  system.tools.nixos-generate-config.enable = mkDefault false;
+
   zramSwap.enable = mkDefault true;
 }
