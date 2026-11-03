@@ -1,6 +1,6 @@
 _final: prev: {
   uboot-allwinner = prev.callPackage (
-    { buildUBoot, fetchFromGitHub }:
+    { buildUBoot }:
 
     let
       buildSun5iUBoot =
@@ -21,19 +21,12 @@ _final: prev: {
     {
       uBootCHIP = buildSun5iUBoot "CHIP_defconfig" { };
 
-      # Untested on hardware: reading the MLC NAND from this build, and the
-      # on-flash bad block table agreeing with the kernel (nand-on-flash-bbt
-      # in profiles/allwinner/chip/nand.dts), are taken from x-chip-uboot.
+      # Untested on hardware: the x-chip-uboot SLC-on-MLC patches are rebased
+      # from v2022.01, so reading the MLC NAND and the on-flash bad block
+      # table agreeing with the kernel (nand-on-flash-bbt in
+      # profiles/allwinner/chip/nand.dts) are unverified.
       uBootCHIPNand = buildSun5iUBoot "CHIP_defconfig" {
-        version = "2022.01";
-        src = fetchFromGitHub {
-          owner = "u-boot";
-          repo = "u-boot";
-          rev = "v2022.01";
-          hash = "sha256-kKxo62/TI0HD8uZaL39FyJc783JsErkfspKsQ6uvEMU=";
-        };
         extraPatches = [
-          ./binman-importlib-resources.patch
           ./chip-nand-slc-emulation.patch
           ./chip-nand-spl-dma.patch
           ./chip-w1-read-address.patch
@@ -43,6 +36,7 @@ _final: prev: {
           CONFIG_CMD_UBI=y
           CONFIG_CMD_UBIFS=y
           CONFIG_DM_MTD=y
+          CONFIG_FASTBOOT_FLASH=y
           CONFIG_FASTBOOT_FLASH_NAND=y
           CONFIG_MTD=y
           CONFIG_MTDIDS_DEFAULT="nand0=nand0"

@@ -187,9 +187,11 @@ let
       ++ optionals ((kernel.structuredExtraConfig.MTD_NAND_SUNXI or null) == null) [
         "kernel cannot attach the NAND before the initrd mounts the root"
       ]
-      ++ optionals (nand != (uBoot.version == "2022.01")) [
-        "U-Boot does not match the root storage"
-      ]
+      ++
+        optionals (nand != (uBoot.drvPath == evaluated.${name}.pkgs.uboot-allwinner.uBootCHIPNand.drvPath))
+          [
+            "U-Boot does not match the root storage"
+          ]
       ++ optionals (nand != elem "ubi.mtd=rootfs" cfg.boot.kernelParams) [
         "UBI attach parameter does not match the root storage"
       ]

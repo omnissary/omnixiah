@@ -13,23 +13,25 @@ CHIP DIP's DS24xx ID EEPROM in the NAND boot script and pick a DT overlay.
 
 Signed-off-by: CHIP Builder <chip@localhost>
 ---
- cmd/w1.c | 21 +++++++++++++++++----
- 1 file changed, 17 insertions(+), 4 deletions(-)
+ cmd/w1.c | 24 ++++++++++++++++++------
+ 1 file changed, 18 insertions(+), 6 deletions(-)
 
+diff --git a/cmd/w1.c b/cmd/w1.c
+index e462e786a96..df1dba63dc8 100644
 --- a/cmd/w1.c
 +++ b/cmd/w1.c
-@@ -9,6 +9,7 @@
+@@ -8,6 +8,7 @@
  #include <dm.h>
  #include <w1.h>
  #include <w1-eeprom.h>
 +#include <mapmem.h>
  #include <dm/device-internal.h>
-
+ 
  static int w1_bus(void)
-@@ -97,9 +98,18 @@ static int w1_read(int argc, char *const argv[])
+@@ -96,9 +97,18 @@ static int w1_read(int argc, char *const argv[])
  		return CMD_RET_FAILURE;
  	}
-
+ 
 -	for (i = 0; i < len; i++)
 -		printf("%x", buf[i]);
 -	printf("\n");
@@ -45,13 +47,13 @@ Signed-off-by: CHIP Builder <chip@localhost>
 +			printf("%02x", buf[i]);
 +		printf("\n");
 +	}
-
+ 
  	return CMD_RET_SUCCESS;
  }
-@@ -118,10 +128,12 @@ int do_w1(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+@@ -117,10 +127,12 @@ int do_w1(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
  	return CMD_RET_SUCCESS;
  }
-
+ 
 -U_BOOT_CMD(w1, 6, 0, do_w1,
 +U_BOOT_CMD(w1, 7, 0, do_w1,
  	   "onewire interface utility commands",
