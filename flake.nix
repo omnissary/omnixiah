@@ -18,7 +18,14 @@
       url = "tarball+https://git.tatikoma.dev/omnixiah/xlibre/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nix.url = "tarball+https://git.tatikoma.dev/omnixiah/nix/archive/omnixiah.tar.gz";
+    nix = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/nix/archive/omnixiah.tar.gz";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        nixpkgs-23-11.follows = "";
+        nixpkgs-regression.follows = "";
+      };
+    };
 
     disko = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/disko/archive/omnixiah.tar.gz";
