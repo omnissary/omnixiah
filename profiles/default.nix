@@ -61,9 +61,11 @@ in
       system.extraDependencies = inputSources inputs.self;
     };
 
+  allwinner = ./allwinner;
   debug = ./debug.nix;
   microvm = ./microvm.nix;
   orangepi-3b = ./rockchip/orangepi-3b.nix;
+  pocketchip = ./allwinner/pocketchip.nix;
   qemu = ./qemu.nix;
   rockchip = ./rockchip;
 }

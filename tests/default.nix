@@ -6,6 +6,9 @@
 }:
 
 {
+  allwinner = import ./modules/allwinner.nix {
+    inherit pkgs self;
+  };
   coverage = import ./coverage.nix {
     inherit pkgs self system;
   };

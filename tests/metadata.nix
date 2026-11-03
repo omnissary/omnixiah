@@ -1,4 +1,7 @@
 {
+  allwinner = {
+    description = "Allwinner board profiles evaluation test";
+  };
   coverage = {
     description = "Base profile coverage of the Omnixiah entry points";
   };

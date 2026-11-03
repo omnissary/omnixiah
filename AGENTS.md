@@ -13,6 +13,8 @@ Omnixiah is a NixOS spin built around reusable NixOS profiles.
   - `microvm`: instantiated for every supported Linux system and exposed as the runnable `microvm` package and app.
   - `rockchip`: SoC family boot and image setup in `profiles/rockchip/default.nix`, driven by `hardware.rockchip.uBoot`.
   - `orangepi-3b`: board profile. A board is `profiles/rockchip/<board>.nix`, imports `./.`, selects its U-Boot (nixpkgs `pkgs.uboot*` when available, otherwise `pkgs.uboot-rockchip`), and is added to `boards` in `tests/modules/rockchip.nix`.
+  - `allwinner`: SoC family boot and image setup in `profiles/allwinner/default.nix`, driven by `hardware.allwinner.uBoot`. The image carries U-Boot at 8 KiB for SD boot; `system.build.felBoot` uploads the same U-Boot over USB for boards without SD, which then boots extlinux from USB storage.
+  - `pocketchip`: board profile for the NextThing PocketC.H.I.P. (armv7l). Mainline Linux cannot use its MLC NAND, so the root lives on USB storage. Allwinner boards follow the Rockchip layout under `profiles/allwinner/`, keep device tree overlays next to the board as `<board>.dts`, take U-Boot from `pkgs.uboot-allwinner`, and are added to `boards` in `tests/modules/allwinner.nix`. armv7l has no binary cache, so consumers build these systems cross by setting `nixpkgs.buildPlatform`.
 
 A directory is entered through its `default.nix`, and a file is named after what it is, never after the directory holding it: `modules/tc.nix`, not `modules/tc-module.nix`.
 

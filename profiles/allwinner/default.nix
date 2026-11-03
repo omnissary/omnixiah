@@ -1,0 +1,50 @@
+{
+  config,
+  lib,
+  modulesPath,
+  pkgs,
+  ...
+}:
+
+let
+  inherit (lib) mkDefault;
+
+  inherit (config.hardware.allwinner) uBoot;
+  inherit (config.boot.loader.generic-extlinux-compatible) populateCmd;
+  inherit (pkgs.buildPackages) sunxi-tools writeShellScript;
+in
+
+{
+  imports = [
+    "${modulesPath}/installer/sd-card/sd-image.nix"
+  ];
+
+  boot = {
+    consoleLogLevel = mkDefault 7;
+    loader = {
+      grub.enable = false;
+      generic-extlinux-compatible.enable = true;
+    };
+  };
+
+  modules.boot.consoles = mkDefault [
+    "ttyS0,115200"
+    "tty0"
+  ];
+
+  sdImage = {
+    compressImage = false;
+    populateFirmwareCommands = "";
+    postBuildCommands = ''
+      dd if="${uBoot}/u-boot-sunxi-with-spl.bin" of="$img" bs=1024 seek=8 conv=fsync,notrunc
+    '';
+    populateRootCommands = ''
+      mkdir -p ./files/boot
+      ${populateCmd} -c ${config.system.build.toplevel} -d ./files/boot
+    '';
+  };
+
+  system.build.felBoot = writeShellScript "fel-boot" ''
+    exec ${sunxi-tools}/bin/sunxi-fel -v -p uboot ${uBoot}/u-boot-sunxi-with-spl.bin
+  '';
+}
