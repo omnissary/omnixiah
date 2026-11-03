@@ -13,8 +13,8 @@ let
     mkIf
     mkOption
     types
-    versionAtLeast
     ;
+  inherit (lib.meta) availableOn;
 
   cfg = config.modules.update-diff;
 in
@@ -28,7 +28,7 @@ in
     command = mkOption {
       type = types.singleLineStr;
       default =
-        if versionAtLeast (pkgs.dix.version or "0") "1.4.2" then
+        if availableOn pkgs.stdenv.hostPlatform pkgs.dix then
           "${getExe pkgs.dix} --force-correctness"
         else
           "${pkgs.nvd}/bin/nvd --nix-bin-dir=${config.nix.package}/bin diff";
