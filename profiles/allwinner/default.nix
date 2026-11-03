@@ -7,7 +7,7 @@
 }:
 
 let
-  inherit (lib) mkDefault;
+  inherit (lib) mkDefault mkForce;
 
   inherit (config.hardware.allwinner) uBoot;
   inherit (config.boot.loader.generic-extlinux-compatible) populateCmd;
@@ -15,8 +15,6 @@ let
 in
 
 {
-  # sd-image.nix forces hardware.enableAllHardware, which bloats the initrd;
-  # profiles/rockchip has the same problem.
   imports = [
     "${modulesPath}/installer/sd-card/sd-image.nix"
   ];
@@ -29,6 +27,8 @@ in
       generic-extlinux-compatible.enable = true;
     };
   };
+
+  hardware.enableAllHardware = mkForce false;
 
   modules.boot.consoles = mkDefault [
     "ttyS0,115200"

@@ -148,6 +148,9 @@ let
       ++ optionals (!any (package: (package.name or "") == "rtl8723bs-firmware") firmware) [
         "RTL8723BS firmware is not installed"
       ]
+      ++ optionals (cfg.hardware.enableAllHardware || cfg.hardware.enableRedistributableFirmware) [
+        "sd-image pulls in all hardware support and redistributable firmware"
+      ]
       ++ optionals (cfg.networking.networkmanager.wifi.macAddress != "permanent") [
         "NetworkManager randomizes the RTL8723BS MAC address"
       ]
