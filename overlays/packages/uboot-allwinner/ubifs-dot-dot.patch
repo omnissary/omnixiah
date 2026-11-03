@@ -1,0 +1,59 @@
+Subject: [PATCH] fs: ubifs: resolve "." and ".." in paths
+
+UBIFS directories have no "." and ".." entries, so ubifs_findfile()
+failed on any path containing them. The extlinux code builds kernel and
+initrd paths relative to the configuration file, and NixOS writes them
+as ../nixos/..., so sysboot read extlinux.conf from UBIFS but could not
+load the kernel. Normalise the path lexically before the lookup.
+
+---
+diff --git a/fs/ubifs/ubifs.c b/fs/ubifs/ubifs.c
+index 6121fb0b135..66350eda448 100644
+--- a/fs/ubifs/ubifs.c
++++ b/fs/ubifs/ubifs.c
+@@ -501,6 +501,37 @@ out_free:
+ 	return ret;
+ }
+ 
++/*
++ * UBIFS directories have no "." and ".." entries, so resolve them
++ * lexically before looking the path up, as callers such as the extlinux
++ * code build paths relative to the configuration file.
++ */
++static void ubifs_normalize_path(char *path)
++{
++	char *src = path, *dst = path;
++
++	while (*src) {
++		char *end = strchrnul(src, '/');
++		size_t len = end - src;
++
++		if (len == 0 || (len == 1 && src[0] == '.')) {
++			/* skip empty and "." components */
++		} else if (len == 2 && src[0] == '.' && src[1] == '.') {
++			while (dst > path && *--dst != '/')
++				;
++		} else {
++			if (dst > path)
++				*dst++ = '/';
++			memmove(dst, src, len);
++			dst += len;
++		}
++
++		src = *end ? end + 1 : end;
++	}
++
++	*dst = '\0';
++}
++
+ static unsigned long ubifs_findfile(struct super_block *sb, char *filename)
+ {
+ 	int ret;
+@@ -521,6 +552,7 @@ static unsigned long ubifs_findfile(struct super_block *sb, char *filename)
+ 	if (!buf)
+ 		return -ENOMEM;
+ 	memcpy(buf, filename, filenamelen + 1);
++	ubifs_normalize_path(buf);
+ 	name = buf;
+ 
+ 	/*

@@ -32,6 +32,7 @@ _final: prev: {
           ./sparse-bounce-buffer.patch
           ./sparse-write-errors.patch
           ./fastboot-nand-sparse-reserve.patch
+          ./ubifs-dot-dot.patch
           ./chip-nand-spl-dma.patch
           ./chip-w1-read-address.patch
         ];
