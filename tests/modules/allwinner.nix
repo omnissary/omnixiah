@@ -31,7 +31,7 @@ let
       profile = "chip";
       storage = "usb";
       uBootDefconfig = "CHIP_defconfig";
-      dtb = "allwinner/sun5i-r8-chip.dtb";
+      dtb = "sun5i-r8-chip.dtb";
       overlays = [ ];
       pocketchip = false;
     };
@@ -39,7 +39,7 @@ let
       profile = "pocketchip";
       storage = "usb";
       uBootDefconfig = "CHIP_defconfig";
-      dtb = "allwinner/sun5i-r8-chip.dtb";
+      dtb = "sun5i-r8-chip.dtb";
       overlays = [ "pocketchip" ];
       pocketchip = true;
     };
@@ -47,7 +47,7 @@ let
       profile = "pocketchip";
       storage = "nand";
       uBootDefconfig = "CHIP_defconfig";
-      dtb = "allwinner/sun5i-r8-chip.dtb";
+      dtb = "sun5i-r8-chip.dtb";
       overlays = [
         "chip-nand"
         "pocketchip"

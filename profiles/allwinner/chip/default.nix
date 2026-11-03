@@ -28,7 +28,7 @@ in
       if nand then pkgs.uboot-allwinner.uBootCHIPNand else pkgs.uboot-allwinner.uBootCHIP
     );
     deviceTree = {
-      name = "allwinner/sun5i-r8-chip.dtb";
+      name = "sun5i-r8-chip.dtb";
       filter = "sun5i-r8-chip.dtb";
     };
     firmware = [ rtl8723bsFirmware ];
