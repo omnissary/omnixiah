@@ -1,9 +1,7 @@
 _self: super:
-# fish builds an xtask helper for the build platform that links pcre2 through
-# pcre2-sys. When cross-compiling only the host pcre2 and the host-prefixed
-# pkg-config are available, so the helper is pointed at the target libpcre2
-# and fails to link. HOST_PKG_CONFIG is only read for build-platform crates,
-# the target fish still links the target pcre2.
+# Cross builds only: fish compiles a build-machine helper (xtask) that links
+# pcre2, but pkg-config hands it the target's libpcre2 and linking fails.
+# Give the build side its own pkg-config and pcre2.
 super.lib.optionalAttrs (super.stdenv.buildPlatform != super.stdenv.hostPlatform) {
   fish = super.fish.overrideAttrs (old: {
     depsBuildBuild = (old.depsBuildBuild or [ ]) ++ [
