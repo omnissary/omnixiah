@@ -21,6 +21,7 @@ in
 
   boot = {
     consoleLogLevel = mkDefault 7;
+    kernelPackages = mkDefault pkgs.linuxPackages_allwinner;
     loader = {
       grub.enable = false;
       generic-extlinux-compatible.enable = true;

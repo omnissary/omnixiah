@@ -10,6 +10,7 @@ let
     any
     hasPrefix
     mkBefore
+    mkDefault
     mkOption
     optional
     optionalString
@@ -71,7 +72,7 @@ in
 
     console = {
       font = "Lat2-Terminus16";
-      keyMap = "us";
+      keyMap = mkDefault "us";
       earlySetup = true;
     };
   };

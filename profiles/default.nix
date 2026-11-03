@@ -62,10 +62,11 @@ in
     };
 
   allwinner = ./allwinner;
+  chip = ./allwinner/chip;
   debug = ./debug.nix;
   microvm = ./microvm.nix;
   orangepi-3b = ./rockchip/orangepi-3b.nix;
-  pocketchip = ./allwinner/pocketchip.nix;
+  pocketchip = ./allwinner/pocketchip;
   qemu = ./qemu.nix;
   rockchip = ./rockchip;
 }

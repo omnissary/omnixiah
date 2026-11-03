@@ -5,7 +5,9 @@
 
 let
   inherit (builtins)
+    any
     attrNames
+    concatLists
     concatMap
     elem
     unsafeDiscardStringContext
@@ -22,16 +24,23 @@ let
   hostPlatform = "armv7l-linux";
 
   boards = {
+    chip = {
+      uBootDefconfig = "CHIP_defconfig";
+      dtb = "allwinner/sun5i-r8-chip.dtb";
+      overlays = [ ];
+      pocketchip = false;
+    };
     pocketchip = {
       uBootDefconfig = "CHIP_defconfig";
       dtb = "allwinner/sun5i-r8-chip.dtb";
       overlays = [ "pocketchip" ];
+      pocketchip = true;
     };
   };
 
   evaluate =
     name: _:
-    (nixosSystem {
+    nixosSystem {
       specialArgs = {
         inherit self;
       };
@@ -45,7 +54,7 @@ let
           };
         }
       ];
-    }).config;
+    };
 
   evaluated = mapAttrs evaluate boards;
 
@@ -53,11 +62,19 @@ let
     name:
     let
       board = boards.${name};
-      cfg = evaluated.${name};
+      inherit (evaluated.${name}) options;
+      cfg = evaluated.${name}.config;
+      firmware = concatLists options.hardware.firmware.definitions;
       inherit (cfg.hardware.allwinner) uBoot;
       postBuild = unsafeDiscardStringContext cfg.sdImage.postBuildCommands;
       felBoot = unsafeDiscardStringContext cfg.system.build.felBoot.text;
       uBootPath = unsafeDiscardStringContext uBoot.outPath;
+      inherit (cfg.boot.kernelPackages) kernel;
+      patches = map (patch: patch.name) kernel.kernelPatches;
+      udevRules = unsafeDiscardStringContext cfg.services.udev.extraRules;
+      touchCalibrated =
+        hasInfix ''DRIVERS=="sun4i-ts"'' udevRules && hasInfix "LIBINPUT_CALIBRATION_MATRIX" udevRules;
+      xkbPocketchip = cfg.services.xserver.xkb.extraLayouts ? pocketchip;
     in
     map (error: "${name}: ${error}") (
       optionals ((uBoot.defconfig or null) != board.uBootDefconfig) [
@@ -90,6 +107,47 @@ let
       ++ optionals (hasInfix "dix" cfg.modules.update-diff.command) [
         "update diff uses dix, which is unavailable on ${hostPlatform}"
       ]
+      ++ optionals ((kernel.structuredExtraConfig.BT_HCIUART_RTL or null) == null) [
+        "kernel lacks Realtek HCI UART support for the RTL8723BS Bluetooth"
+      ]
+      ++ optionals (!elem "amnezia wireguard extension" patches) [
+        "Allwinner kernel is missing the Omnixiah kernel patches"
+      ]
+      ++ optionals (!elem "fw_devlink=permissive" cfg.boot.kernelParams) [
+        "display waits for the fw_devlink deferred-probe timeout"
+      ]
+      ++
+        optionals (!hasInfix "options r8723bs rtw_power_mgnt=0 rtw_ips_mode=0" cfg.boot.extraModprobeConfig)
+          [
+            "r8723bs firmware power saving is not disabled"
+          ]
+      ++ optionals (!any (package: (package.name or "") == "rtl8723bs-firmware") firmware) [
+        "RTL8723BS firmware is not installed"
+      ]
+      ++ optionals (cfg.networking.networkmanager.wifi.macAddress != "permanent") [
+        "NetworkManager randomizes the RTL8723BS MAC address"
+      ]
+      ++ optionals ((cfg.services.logind.settings.Login.HandlePowerKey or null) != "ignore") [
+        "logind powers off on a short power key press"
+      ]
+      ++ optionals (touchCalibrated != board.pocketchip) [
+        "touchscreen calibration does not match the board"
+      ]
+      ++ optionals (xkbPocketchip != board.pocketchip) [
+        "PocketCHIP keyboard layout does not match the board"
+      ]
+      ++ optionals (board.pocketchip && !hasInfix "pocketchip" (toString cfg.console.keyMap)) [
+        "PocketCHIP console keymap is not loaded"
+      ]
+      ++
+        optionals
+          (
+            board.pocketchip
+            && !(cfg.services.upower.enable && cfg.services.upower.criticalPowerAction == "PowerOff")
+          )
+          [
+            "battery critical level does not power off"
+          ]
       ++ optionals cfg.boot.loader.grub.enable [
         "GRUB is enabled"
       ]
