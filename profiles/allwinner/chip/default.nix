@@ -75,7 +75,9 @@ in
 
   zramSwap.enable = mkDefault true;
 
-  # Always cross-built and never evaluates flakes on device; pinned input
-  # sources would take hundreds of MiB of the NAND.
+  # Always cross-built and deployed remotely, nix never evaluates on device;
+  # pinned input sources and nixpkgs would take hundreds of MiB of the NAND.
   system.extraDependencies = mkForce [ ];
+  nixpkgs.flake.source = mkForce null;
+  environment.etc."omnixiah/nixpkgs".enable = false;
 }
