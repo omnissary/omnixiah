@@ -17,6 +17,8 @@ let
     mkForce
     mkIf
     mkOverride
+    optionalAttrs
+    remove
     ;
 
   nand = config.hardware.allwinner.chip.storage == "nand";
@@ -183,7 +185,7 @@ in
   nixpkgs.overlays = [
     (
       _final: prev:
-      lib.optionalAttrs (prev.stdenv.hostPlatform.config == config.nixpkgs.hostPlatform.config) {
+      optionalAttrs (prev.stdenv.hostPlatform.config == config.nixpkgs.hostPlatform.config) {
         systemd = prev.systemd.overrideAttrs (old: {
           patches = old.patches or [ ] ++ [ systemdSearchPath ];
         });
@@ -191,7 +193,7 @@ in
     )
   ];
   systemd.package = pkgs.systemd.overrideAttrs (old: {
-    patches = lib.remove systemdSearchPath old.patches;
+    patches = remove systemdSearchPath old.patches;
   });
 
   # Always cross-built and deployed remotely, nix never evaluates on device;
