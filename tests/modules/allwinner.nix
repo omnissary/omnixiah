@@ -207,6 +207,9 @@ let
           [
             "U-Boot does not match the root storage"
           ]
+      ++ optionals (nand && !hasInfix "CONFIG_FASTBOOT_FLASH_NAND_TRIMFFS=y" (uBoot.extraConfig or "")) [
+        "fastboot programs all-0xFF pages that UBI expects to stay erased"
+      ]
       ++ optionals (nand != elem "ubi.mtd=rootfs" cfg.boot.kernelParams) [
         "UBI attach parameter does not match the root storage"
       ]

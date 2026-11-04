@@ -50,6 +50,7 @@ _final: prev: {
           CONFIG_DM_MTD=y
           CONFIG_FASTBOOT_FLASH=y
           CONFIG_FASTBOOT_FLASH_NAND=y
+          CONFIG_FASTBOOT_FLASH_NAND_TRIMFFS=y
           CONFIG_MTD=y
           CONFIG_MTDIDS_DEFAULT="nand0=nand0"
           CONFIG_MTDPARTS_DEFAULT="nand0:0x400000(SPL),0x400000(SPL.backup),0x400000(U-Boot),0x400000(U-Boot.backup),-(rootfs)slc"
