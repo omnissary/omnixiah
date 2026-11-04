@@ -1,0 +1,41 @@
+Subject: [PATCH] mtd: rawnand: sunxi_spl: fix the ECC strength limit
+
+nand_max_ecc_strength() compares the user data size against the
+per-sector ECC budget, but for controllers with a fixed user data length
+nand_min_user_data_sz() returns the sum over all sectors. With 16 KiB
+pages and 1 KiB sectors only the weakest ECC mode was ever tried, so the
+SPL could not detect the layout full U-Boot and Linux write and failed to
+load U-Boot from NAND. Compare the per-sector share instead.
+
+---
+diff --git a/drivers/mtd/nand/raw/sunxi_nand_spl.c b/drivers/mtd/nand/raw/sunxi_nand_spl.c
+index b5bd698f97c..3bfd8486844 100644
+--- a/drivers/mtd/nand/raw/sunxi_nand_spl.c
++++ b/drivers/mtd/nand/raw/sunxi_nand_spl.c
+@@ -558,6 +558,7 @@ static int nand_max_ecc_strength(struct nfc_config *conf)
+ 	int max_oobsize, max_ecc_bytes;
+ 	int nsectors = conf->page_size / conf->ecc_size;
+ 	unsigned int total_user_data_sz = 0;
++	unsigned int sector_user_data_sz;
+ 	int ecc_idx, i;
+ 
+ 	/*
+@@ -591,8 +592,17 @@ static int nand_max_ecc_strength(struct nfc_config *conf)
+ 	 */
+ 	total_user_data_sz = nand_min_user_data_sz(conf, nsectors);
+ 
++	/*
++	 * A fixed user data length is summed over all the sectors, while
++	 * max_ecc_bytes is a per-sector budget.
++	 */
++	if (!conf->caps->reg_user_data_len)
++		sector_user_data_sz = DIV_ROUND_UP(total_user_data_sz, nsectors);
++	else
++		sector_user_data_sz = total_user_data_sz;
++
+ 	for (ecc_idx = 0; ecc_idx < ARRAY_SIZE(ecc_bytes); ecc_idx++) {
+-		if (ecc_bytes[ecc_idx] + total_user_data_sz > max_ecc_bytes)
++		if (ecc_bytes[ecc_idx] + sector_user_data_sz > max_ecc_bytes)
+ 			break;
+ 	}
+ 

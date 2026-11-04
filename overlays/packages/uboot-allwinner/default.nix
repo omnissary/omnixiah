@@ -3,6 +3,12 @@ _final: prev: {
     { buildUBoot }:
 
     let
+      # The default sunxi layout leaves 16 MiB for the kernel at 0x42000000,
+      # the armv7 zImage is larger, so move everything after it up.
+      memoryLayout = ''
+        CONFIG_PREBOOT="usb start; setenv fdt_addr_r 0x44000000; setenv scriptaddr 0x44100000; setenv pxefile_addr_r 0x44200000; setenv fdtoverlay_addr_r 0x44300000; setenv ramdisk_addr_r 0x44400000"
+      '';
+
       buildSun5iUBoot =
         defconfig: args:
         buildUBoot (
@@ -16,6 +22,9 @@ _final: prev: {
             ];
           }
           // args
+          // {
+            extraConfig = memoryLayout + (args.extraConfig or "");
+          }
         );
     in
     {
@@ -34,6 +43,7 @@ _final: prev: {
           ./fastboot-nand-sparse-reserve.patch
           ./ubifs-dot-dot.patch
           ./chip-nand-spl-dma.patch
+          ./sunxi-nand-spl-ecc-strength.patch
           ./chip-w1-read-address.patch
         ];
         extraConfig = ''
