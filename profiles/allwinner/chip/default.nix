@@ -6,7 +6,12 @@
 }:
 
 let
-  inherit (lib) mkDefault mkForce mkOverride;
+  inherit (lib)
+    mkDefault
+    mkForce
+    mkIf
+    mkOverride
+    ;
 
   nand = config.hardware.allwinner.chip.storage == "nand";
 
@@ -70,6 +75,15 @@ in
   nix.optimise.automatic = mkOverride 900 false;
 
   services.fwupd.enable = mkOverride 900 false;
+
+  services.speechd.enable = mkOverride 900 false;
+
+  services.xserver.desktopManager.wallpaper.enable = mkDefault false;
+
+  fonts = {
+    enableDefaultPackages = mkOverride 900 false;
+    packages = mkIf config.services.xserver.enable [ pkgs.dejavu_fonts ];
+  };
 
   system.tools.nixos-generate-config.enable = mkDefault false;
 

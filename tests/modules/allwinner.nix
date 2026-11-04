@@ -162,6 +162,15 @@ let
       ++ optionals cfg.services.fwupd.enable [
         "fwupd is enabled on a board without UEFI or LVFS devices"
       ]
+      ++ optionals cfg.services.speechd.enable [
+        "speech-dispatcher pulls ffmpeg, SDL and espeak onto the flash"
+      ]
+      ++ optionals cfg.fonts.enableDefaultPackages [
+        "default fonts pull Noto CJK onto the flash"
+      ]
+      ++ optionals cfg.services.xserver.desktopManager.wallpaper.enable [
+        "X session sets the wallpaper with feh, which pulls ghostscript"
+      ]
       ++ optionals cfg.nix.optimise.automatic [
         "nix-optimise rewrites the store on flash daily"
       ]
