@@ -122,10 +122,10 @@ in
     enable = true;
     networks."40-usb0" = {
       matchConfig.Name = "usb0";
-      address = [ "100.127.255.1/30" ];
+      address = [ "169.254.127.1/16" ];
       networkConfig.DHCPServer = true;
       dhcpServerConfig = {
-        PoolOffset = 2;
+        PoolOffset = 32514;
         PoolSize = 1;
         EmitDNS = false;
         EmitRouter = false;

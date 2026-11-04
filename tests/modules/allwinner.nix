@@ -133,7 +133,7 @@ let
       ++ optionals (!elem "g_ether" cfg.boot.kernelModules) [
         "USB Ethernet gadget is not loaded on the OTG port"
       ]
-      ++ optionals (!elem "100.127.255.1/30" (cfg.systemd.network.networks."40-usb0".address or [ ])) [
+      ++ optionals (!elem "169.254.127.1/16" (cfg.systemd.network.networks."40-usb0".address or [ ])) [
         "USB Ethernet gadget has no address"
       ]
       ++ optionals (!elem 22 (cfg.networking.firewall.interfaces.usb0.allowedTCPPorts or [ ])) [
