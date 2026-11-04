@@ -381,11 +381,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792766615,
-        "narHash": "sha256-GjQp1ANA4mOkFwJOj1zaBuHfESKZkdip/nZqcHuND9Q=",
-        "rev": "5c50b8d29737c150dad33adf06f1c81ae94eb769",
+        "lastModified": 1793803963,
+        "narHash": "sha256-ANaqM8IsOk3/V2n7ROQjm+Y4jBcLByqS4VfIZe1dcuM=",
+        "rev": "e077bc8c9e06c7983a876332e05094f15925fa93",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/xlibre/archive/5c50b8d29737c150dad33adf06f1c81ae94eb769.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/xlibre/archive/e077bc8c9e06c7983a876332e05094f15925fa93.tar.gz"
       },
       "original": {
         "type": "tarball",
