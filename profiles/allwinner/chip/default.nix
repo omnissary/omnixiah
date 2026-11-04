@@ -57,6 +57,28 @@ in
     '';
   };
 
+  systemd.network = {
+    enable = true;
+    networks."40-usb0" = {
+      matchConfig.Name = "usb0";
+      address = [ "100.127.255.1/30" ];
+      networkConfig.DHCPServer = true;
+      dhcpServerConfig = {
+        PoolOffset = 2;
+        PoolSize = 1;
+        EmitDNS = false;
+        EmitRouter = false;
+      };
+    };
+  };
+
+  networking.firewall.interfaces.usb0 = {
+    allowedTCPPorts = config.services.openssh.ports;
+    allowedUDPPorts = [ 67 ];
+  };
+
+  networking.networkmanager.unmanaged = [ "usb0" ];
+
   networking.networkmanager.wifi = {
     macAddress = mkDefault "permanent";
     scanRandMacAddress = mkDefault false;
