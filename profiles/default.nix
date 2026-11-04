@@ -7,6 +7,7 @@ let
   inherit (builtins) toJSON;
   inherit (lib)
     concatMapStringsSep
+    defaultTo
     mapAttrs'
     mkBefore
     mkDefault
@@ -55,7 +56,7 @@ in
       environment.etc =
         mapAttrs' (name: source: nameValuePair "omnixiah/${name}" { inherit source; }) cfg.sources
         // {
-          "omnixiah/nixpkgs".source = pkgs.path;
+          "omnixiah/nixpkgs".source = defaultTo pkgs.path config.nixpkgs.flake.source;
           "omnixiah/overlays.nix".source = overlaysFile;
         };
       system.extraDependencies = inputSources inputs.self;
