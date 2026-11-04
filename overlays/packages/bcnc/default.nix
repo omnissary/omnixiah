@@ -7,6 +7,11 @@ final: _prev: {
       fetchFromGitHub,
       fetchPypi,
       nix-update-script,
+      tkgl,
+      tcl-8_6,
+      tcl-9_0,
+      tk-8_6,
+      tk-9_0,
     }:
 
     let
@@ -24,9 +29,21 @@ final: _prev: {
         setuptools
         svgelements
         tkinter
-        tkinter-gl
         wheel
         ;
+
+      # nixpkgs builds tkinter on Python 3.14 against Tcl/Tk 9 but tkgl against
+      # 8.6, so Tcl 9 looks for libtcl9Tkgl and fails to load the widget.
+      tkinter-gl = pythonPackages.tkinter-gl.override {
+        tkgl =
+          let
+            tcl9 = pythonPackages.pythonAtLeast "3.14";
+          in
+          tkgl.override {
+            tcl = if tcl9 then tcl-9_0 else tcl-8_6;
+            tk = if tcl9 then tk-9_0 else tk-8_6;
+          };
+      };
 
       shxparser = buildPythonPackage rec {
         pname = "shxparser";
