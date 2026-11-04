@@ -61,6 +61,21 @@ In Nix files, bring helpers into scope with local inherit bindings instead of us
 
 No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles.
 
+## Store Paths
+
+Nix has two kinds of file references: path values (`./foo`, `pkgs.path`, `modulesPath`, `./. + "/foo"`, anything a file inside a flake input refers to relative to itself) and strings with store context (`input.outPath`, `"${input}"` on a flake input, `config.nixpkgs.flake.source`, derivation outputs). Coercing a path value into a derivation, an option that becomes one (`environment.etc.<name>.source`, `src`, package lists), or a `"${...}"` string imports it into the store. If the path already lies in the store, the result is a second, identical copy named `<hash>-<original-hash>-<name>`.
+
+Use path values only for repository files that are meant to be imported, and keep those small. When the tree is already in the store (flake inputs, nixpkgs, sources handed in through options), pass the string with context instead. Do not use `toString` on such a path to avoid the copy: it drops the context, so the tree silently stops being a dependency. When a package file from a flake input sets `src` relative to itself (`src = ./..;`), override `src` with the input's `outPath`.
+
+Check for re-imports after adding a dependency, a source, or a package built from a flake input, and when a closure grows unexpectedly. A store path whose name embeds another store hash is a re-import:
+
+```sh
+drv=$(nix eval --raw .#nixosConfigurations.<name>.config.system.build.toplevel.drvPath)
+nix-store -qR "$drv" | grep -E '^/nix/store/[0-9a-z]{32}-[0-9a-z]{32}-'
+```
+
+The command must print nothing. Inspect what remains with `nix path-info -rsh <toplevel>` and look for large `-source` trees. On cross-compiled systems, also check `nix path-info -r <toplevel> | grep -v -- -<target-triple>-` for build-platform packages that leaked into the runtime closure.
+
 ## Testing Guidelines
 
 Tests under `tests/modules/` should exercise module evaluation or deterministic VM behavior for changed modules. Build VM tests with `pkgs.omnixiah.runNixOSTest` and evaluation tests with `lib.nixosSystem`; neither needs an explicit `profiles.base` import. Tests do not have internet access; assert generated configuration, evaluated options, local units, or local network state. Every profile should evaluate with `just eval <profile>`. Before submitting changes, run `just fmt`, `just test`, and `just lint`. CI in `.gitea/workflows/ci.yaml` runs `just lint` and `just test`.
