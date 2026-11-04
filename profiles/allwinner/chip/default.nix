@@ -78,6 +78,8 @@ in
 
   services.speechd.enable = mkOverride 900 false;
 
+  services.pipewire.enable = mkOverride 900 false;
+
   services.xserver.desktopManager.wallpaper.enable = mkDefault false;
 
   fonts = {

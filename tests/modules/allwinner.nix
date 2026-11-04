@@ -165,6 +165,9 @@ let
       ++ optionals cfg.services.speechd.enable [
         "speech-dispatcher pulls ffmpeg, SDL and espeak onto the flash"
       ]
+      ++ optionals cfg.services.pipewire.enable [
+        "PipeWire pulls ffmpeg onto the flash"
+      ]
       ++ optionals cfg.fonts.enableDefaultPackages [
         "default fonts pull Noto CJK onto the flash"
       ]
