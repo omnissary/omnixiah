@@ -43,6 +43,7 @@ in
 
   boot = {
     kernelParams = [ "fw_devlink=permissive" ];
+    kernelModules = [ "g_ether" ];
     initrd.availableKernelModules = [
       "ehci_platform"
       "ohci_platform"

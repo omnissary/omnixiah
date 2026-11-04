@@ -130,6 +130,9 @@ let
       ++ optionals (elem "console=ttyAMA0,115200" cfg.boot.kernelParams) [
         "PL011 console is still configured"
       ]
+      ++ optionals (!elem "g_ether" cfg.boot.kernelModules) [
+        "USB Ethernet gadget is not loaded on the OTG port"
+      ]
       ++ optionals (!elem "usb_storage" cfg.boot.initrd.availableKernelModules) [
         "initrd cannot reach a USB root device"
       ]
