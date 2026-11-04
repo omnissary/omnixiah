@@ -165,6 +165,9 @@ let
       ++ optionals cfg.services.speechd.enable [
         "speech-dispatcher pulls ffmpeg, SDL and espeak onto the flash"
       ]
+      ++ optionals (cfg.systemd.package.drvPath != evaluated.${name}.pkgs.systemd.drvPath) [
+        "systemd.package and pkgs.systemd differ, the image ships two systemd copies"
+      ]
       ++ optionals cfg.services.pipewire.enable [
         "PipeWire pulls ffmpeg onto the flash"
       ]

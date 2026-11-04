@@ -20,6 +20,8 @@ let
     cp ${pkgs.linux-firmware}/lib/firmware/rtlwifi/rtl8723bs* $out/lib/firmware/rtlwifi/
     cp ${pkgs.linux-firmware}/lib/firmware/rtl_bt/rtl8723bs* $out/lib/firmware/rtl_bt/
   '';
+
+  systemdSearchPath = pkgs.path + "/nixos/modules/system/boot/systemd-search-path.patch";
 in
 
 {
@@ -90,6 +92,25 @@ in
   system.tools.nixos-generate-config.enable = mkDefault false;
 
   zramSwap.enable = mkDefault true;
+
+  # The systemd module adds systemd-search-path.patch to systemd.package only,
+  # so everything linking pkgs.systemd (dbus-broker, zram-generator, plymouth)
+  # ships a second, unpatched copy. Patch pkgs.systemd for the target too and
+  # hand the module the unpatched one, so both resolve to the same derivation.
+  # Target set only: the build machine keeps the cached systemd.
+  nixpkgs.overlays = [
+    (
+      _final: prev:
+      lib.optionalAttrs (prev.stdenv.hostPlatform.config == config.nixpkgs.hostPlatform.config) {
+        systemd = prev.systemd.overrideAttrs (old: {
+          patches = old.patches or [ ] ++ [ systemdSearchPath ];
+        });
+      }
+    )
+  ];
+  systemd.package = pkgs.systemd.overrideAttrs (old: {
+    patches = lib.remove systemdSearchPath old.patches;
+  });
 
   # Always cross-built and deployed remotely, nix never evaluates on device;
   # pinned input sources and nixpkgs would take hundreds of MiB of the NAND.
