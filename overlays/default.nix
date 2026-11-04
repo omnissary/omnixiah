@@ -65,7 +65,11 @@ let
   };
 
   nixosAnywhereOverlay = nixosAnywhereFinal: _prev: {
-    nixos-anywhere = nixosAnywhereFinal.callPackage (inputs.nixos-anywhere + "/src") { };
+    nixos-anywhere =
+      (nixosAnywhereFinal.callPackage (inputs.nixos-anywhere + "/src") { }).overrideAttrs
+        {
+          src = inputs.nixos-anywhere.outPath;
+        };
   };
 
   omnixiahOverlay = omnixiahFinal: _prev: {
