@@ -30,10 +30,8 @@ _final: prev: {
     {
       uBootCHIP = buildSun5iUBoot "CHIP_defconfig" { };
 
-      # Untested on hardware: the x-chip-uboot SLC-on-MLC patches are rebased
-      # from v2022.01, so reading the MLC NAND and the on-flash bad block
-      # table agreeing with the kernel (nand-on-flash-bbt in
-      # profiles/allwinner/chip/nand.dts) are unverified.
+      # Booted and flashed on the 4 GB Toshiba CHIP only; the 8 GB Hynix part
+      # is untested.
       uBootCHIPNand = buildSun5iUBoot "CHIP_defconfig" {
         extraPatches = [
           ./chip-nand-slc-emulation.patch
@@ -42,7 +40,6 @@ _final: prev: {
           ./sparse-write-errors.patch
           ./fastboot-nand-sparse-reserve.patch
           ./ubifs-dot-dot.patch
-          ./chip-nand-spl-dma.patch
           ./sunxi-nand-spl-ecc-strength.patch
           ./chip-w1-read-address.patch
         ];
