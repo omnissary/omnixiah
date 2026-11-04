@@ -6,7 +6,7 @@
 }:
 
 let
-  inherit (lib) mkDefault mkOverride;
+  inherit (lib) mkDefault mkForce mkOverride;
 
   nand = config.hardware.allwinner.chip.storage == "nand";
 
@@ -74,4 +74,8 @@ in
   system.tools.nixos-generate-config.enable = mkDefault false;
 
   zramSwap.enable = mkDefault true;
+
+  # Always cross-built and never evaluates flakes on device; pinned input
+  # sources would take hundreds of MiB of the NAND.
+  system.extraDependencies = mkForce [ ];
 }
