@@ -177,6 +177,20 @@ let
       ++ optionals (cfg.systemd.package.drvPath != evaluated.${name}.pkgs.systemd.drvPath) [
         "systemd.package and pkgs.systemd differ, the image ships two systemd copies"
       ]
+      ++
+        optionals
+          (
+            cfg.hardware.graphics.package.galliumDrivers != [
+              "lima"
+              "softpipe"
+            ]
+          )
+          [
+            "mesa is not limited to lima and softpipe"
+          ]
+      ++ optionals (!elem "-Dllvm=disabled" cfg.hardware.graphics.package.mesonFlags) [
+        "mesa pulls LLVM onto the flash"
+      ]
       ++ optionals cfg.services.pipewire.enable [
         "PipeWire pulls ffmpeg onto the flash"
       ]

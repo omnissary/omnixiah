@@ -7,6 +7,12 @@
 
 let
   inherit (lib)
+    any
+    elem
+    filter
+    hasPrefix
+    mesonBool
+    mesonEnable
     mkDefault
     mkForce
     mkIf
@@ -22,6 +28,58 @@ let
   '';
 
   systemdSearchPath = pkgs.path + "/nixos/modules/system/boot/systemd-search-path.patch";
+
+  # Mali-400 (lima) with softpipe as the fallback. The default mesa build
+  # links LLVM and clang for llvmpipe, rusticl and the CLC compilers, none of
+  # which lima or softpipe need, and they would take most of the NAND.
+  mesa =
+    (pkgs.mesa.override {
+      galliumDrivers = [
+        "lima"
+        "softpipe"
+      ];
+      vulkanDrivers = [ ];
+      vulkanLayers = [ ];
+      eglPlatforms = [ "x11" ];
+      enablePatentEncumberedCodecs = false;
+      withValgrind = false;
+    }).overrideAttrs
+      (old: {
+        preConfigure = "";
+        mesonFlags =
+          filter (
+            flag:
+            !any (option: hasPrefix "-D${option}=" flag) [
+              "clang-libdir"
+              "gallium-rusticl"
+              "gallium-rusticl-enable-drivers"
+              "teflon"
+              "intel-rt"
+              "video-codecs"
+            ]
+          ) old.mesonFlags
+          ++ [
+            (mesonEnable "llvm" false)
+            (mesonBool "gallium-rusticl" false)
+            (mesonBool "teflon" false)
+            (mesonEnable "intel-rt" false)
+            (mesonEnable "gallium-va" false)
+          ];
+        buildInputs = filter (
+          input:
+          !elem input [
+            pkgs.mesa.llvmPackages.clang
+            pkgs.mesa.llvmPackages.clang-unwrapped
+            pkgs.mesa.llvmPackages.libllvm
+            pkgs.mesa-libclc
+            pkgs.spirv-llvm-translator
+          ]
+        ) old.buildInputs;
+        postInstall = old.postInstall + ''
+          mkdir -p $spirv2dxil
+        '';
+        postFixup = builtins.replaceStrings [ " $opencl/lib/libRusticlOpenCL.so" ] [ "" ] old.postFixup;
+      });
 in
 
 {
@@ -39,6 +97,7 @@ in
       filter = "sun5i-r8-chip.dtb";
     };
     firmware = [ rtl8723bsFirmware ];
+    graphics.package = mkOverride 900 mesa;
   };
 
   boot = {
