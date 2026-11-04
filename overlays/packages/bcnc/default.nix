@@ -2,6 +2,7 @@ final: _prev: {
   bcnc = final.callPackage (
     {
       lib,
+      stdenv,
       python3Packages,
       fetchFromGitHub,
       fetchPypi,
@@ -72,9 +73,13 @@ final: _prev: {
         pyglm
         pyopengl
         tkinter-gl
+      ]
+      # upstream skips opencv on 32-bit arm; both are optional imports
+      ++ lib.optionals (!stdenv.hostPlatform.isAarch32) [
         opencv-python
         scipy
       ];
+      pythonRemoveDeps = lib.optionals stdenv.hostPlatform.isAarch32 [ "opencv-python" ];
 
       passthru.updateScript = nix-update-script {
         extraArgs = [
