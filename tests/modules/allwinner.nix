@@ -213,6 +213,12 @@ let
           [
             "sd-image pulls in all hardware support and redistributable firmware"
           ]
+      ++ optionals (!cfg.networking.wireless.iwd.enable) [
+        "iwd is not enabled for the onboard Wi-Fi"
+      ]
+      ++ optionals (!(cfg.networking.wireless.iwd.settings.General.EnableNetworkConfiguration or false)) [
+        "iwd does not configure the Wi-Fi network"
+      ]
       ++ optionals (cfg.networking.networkmanager.wifi.macAddress != "permanent") [
         "NetworkManager randomizes the RTL8723BS MAC address"
       ]

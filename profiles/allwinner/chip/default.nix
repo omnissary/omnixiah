@@ -138,6 +138,11 @@ in
     allowedUDPPorts = [ 67 ];
   };
 
+  networking.wireless.iwd = {
+    enable = mkDefault true;
+    settings.General.EnableNetworkConfiguration = mkDefault true;
+  };
+
   networking.networkmanager.unmanaged = [ "usb0" ];
 
   networking.networkmanager.wifi = {
