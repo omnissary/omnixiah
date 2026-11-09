@@ -10,11 +10,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793178164,
-        "narHash": "sha256-+Tz3UW3JQTlmuzcI98tfhaJXDNLPJIoRBBlFDLmPR5o=",
-        "rev": "f4d3b4064019e3444bbeaa62e508ccb8d28490b6",
+        "lastModified": 1794210364,
+        "narHash": "sha256-19ybJtjmDdl3lh9AhsL4rKNp7B1EX4X99MjwvoG+Nvs=",
+        "rev": "f6e45a2b4820b17d45c37a376538fc7713b01e2e",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/f4d3b4064019e3444bbeaa62e508ccb8d28490b6.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/f6e45a2b4820b17d45c37a376538fc7713b01e2e.tar.gz"
       },
       "original": {
         "type": "tarball",
@@ -264,11 +264,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1793661247,
-        "narHash": "sha256-Fh7/G1fO5Ytcf8nniwzJeVb7/A/k0woJBfMRB2cM7mY=",
-        "rev": "ffb01dc84e2c5ebbf532f0d5852764c916edbcd8",
+        "lastModified": 1794121861,
+        "narHash": "sha256-8MZjpjM1s6JrcRO7ju7Jst6V22DA+yR9SOaHm19Dyvk=",
+        "rev": "65ea8ab10642e4a35efc9663139507e6460cea14",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixpkgs/archive/ffb01dc84e2c5ebbf532f0d5852764c916edbcd8.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/nixpkgs/archive/65ea8ab10642e4a35efc9663139507e6460cea14.tar.gz"
       },
       "original": {
         "type": "tarball",
