@@ -51,6 +51,7 @@
       url = "tarball+https://git.tatikoma.dev/omnixiah/deploy/archive/master.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
+      inputs.omnixiah.follows = "";
     };
 
     nixos-anywhere = {
