@@ -45,19 +45,23 @@ Use the lowercase `justfile` as the command surface.
 
 - `just profiles`: list profiles from `.#profiles`.
 - `just eval`: evaluate the MicroVM configuration hostname.
-- `just build`: build the MicroVM runner.
+- `just build [args...]`: wrap `nix build`, building the default MicroVM runner when no target is supplied.
 - `just run`: run the MicroVM profile.
 - `just lint`: run `nix flake check --show-trace`.
 - `just test`: run all module tests from `.#lib.tests`.
 - `just fmt`: run treefmt through `nix fmt`.
 
-Direct Nix commands are acceptable for debugging, for example `nix build .#nixosConfigurations.microvm-x86_64-linux.config.microvm.declaredRunner`.
+Use `just build` for builds so local input overrides are respected. This wrapper exists to temporarily redirect inputs, including transitive inputs, to mirrors without changing `flake.nix` or `flake.lock`. The gitignored root `.input-overrides.json` maps source hosts to GitHub owners, for example `{ "git.tatikoma.dev": "github:omnissary" }`. Matching repository names and locked revisions are retained. If the file is absent or contains `{}`, no overrides are applied. Override paths come from this repository's lock graph. Pass targets and flags as separate arguments, for example `just build .#nixosConfigurations.microvm-x86_64-linux.config.microvm.declaredRunner --no-link`.
+
+Direct Nix commands are acceptable for debugging, but direct `nix build` bypasses the wrapper's local input overrides.
 
 ## Coding Style & Naming Conventions
 
 Use two-space indentation for Nix files. Use lower camel case for Nix option-style names and kebab-case for files or directories. Place profile implementations in `profiles/<name>.nix`, register them in `flake.nix`, and construct systems with `lib.nixosSystem` so they receive the base profile. Order-sensitive list options such as `boot.kernelParams` must pin their order with `mkBefore` or `mkAfter` instead of relying on module evaluation order. Do not shadow generic Nixpkgs builders; Omnixiah-specific builders live under the `pkgs.omnixiah` namespace provided by `overlays/default.nix`.
 
 In Nix files, bring helpers into scope with local inherit bindings instead of using qualified calls such as `lib.mkDefault`: `inherit (lib) mkDefault optionalAttrs ...;` and `inherit (builtins) attrNames filter listToAttrs ...;`. Keep each inherit list limited to names used in that file. Keep Nix prelude names such as `map`, `throw`, and `import` direct instead of inheriting them. Do not add explanatory code comments; improve structure or Markdown documentation instead.
+
+The `pkgs` package set is an exception to the inherit rule. Usually use `with pkgs; [ ... ]` for package lists; use explicit `pkgs.<name>` references where they are clearer or needed. Avoid `inherit (pkgs)` for package names. Continue using inherit bindings for helpers from `lib` and `builtins`.
 
 No shortcuts: follow the architecture, keep changes cohesive, and chase failures to their cause. Keep insecure or local-only VM behavior out of shared profiles.
 
@@ -82,7 +86,9 @@ Tests under `tests/modules/` should exercise module evaluation or deterministic 
 
 ## Commit & Pull Request Guidelines
 
-The current history uses concise imperative messages (`init`). Continue with short present-tense commits such as `simplify microvm profile`.
+Create one commit per feature. Keep each commit focused on that feature and include its implementation, tests, and documentation together.
+
+Use multiline commit messages: a concise imperative subject, a blank line, and a body explaining what was changed and why. Do not add AI attribution, AI-generated notices, or AI co-author trailers to commit messages.
 
 Stage changes by explicit path (`git add <path>...`, `git rm <path>...`). Never use `git add -A`, `git add .`, or `git commit -a`: the working tree holds untracked local notes that must not be committed. Check `git diff --cached --stat` before every commit.
 

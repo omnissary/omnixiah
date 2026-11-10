@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import re
+import sys
+from urllib.parse import urlencode, urlsplit
+
+
+def override_args(root):
+    config = root / ".input-overrides.json"
+    if not config.exists():
+        return []
+    rules = json.loads(config.read_text())
+    if not isinstance(rules, dict) or not all(
+        isinstance(host, str)
+        and isinstance(target, str)
+        and re.fullmatch(r"github:[A-Za-z0-9_-]+", target)
+        for host, target in rules.items()
+    ):
+        raise ValueError(".input-overrides.json must map hostnames to github:OWNER strings")
+    if not rules:
+        return []
+    lock = json.loads((root / "flake.lock").read_text())
+    nodes = lock["nodes"]
+    args = ["--no-write-lock-file"]
+
+    def visit(key, path, ancestors):
+        node = nodes[key]
+        original = node.get("original", {})
+        url = urlsplit(original.get("url", "").removeprefix("git+").removeprefix("tarball+"))
+        target = rules.get(url.hostname)
+        if path and target:
+            parts = url.path.strip("/").split("/")
+            if parts[:3] == ["api", "v1", "repos"]:
+                parts = parts[3:]
+            if len(parts) < 2 or not parts[0] or not parts[1]:
+                raise ValueError(f"Cannot identify repository in {original['url']}")
+            repo = parts[1].removesuffix(".git")
+            rev = node.get("locked", {}).get("rev")
+            if not rev:
+                raise ValueError(f"Input {'/'.join(path)} has no locked Git revision")
+            replacement = f"{target}/{repo}/{rev}"
+            if "dir" in original:
+                replacement += "?" + urlencode({"dir": original["dir"]})
+            args.extend(["--override-input", "/".join(path), replacement])
+        for name, child in node.get("inputs", {}).items():
+            if isinstance(child, str) and child not in ancestors:
+                visit(child, path + [name], ancestors | {child})
+
+    visit(lock["root"], [], {lock["root"]})
+    return args
+
+
+def main():
+    root = Path(__file__).resolve().parents[2]
+    try:
+        overrides = override_args(root)
+    except (OSError, ValueError, KeyError) as error:
+        sys.exit(f"Input overrides: {error}")
+    os.chdir(root)
+    os.execvp("nix", ["nix", "build", *overrides, *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    main()

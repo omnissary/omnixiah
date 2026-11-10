@@ -21,8 +21,11 @@ profiles:
 eval:
   nix eval {{nix_flags}} --raw .#nixosConfigurations.microvm-{{system}}.config.networking.hostName
 
-build nix_build_args="":
-  nix build {{nix_flags}} --show-trace {{nix_build_args}} .#microvm
+[positional-arguments]
+build *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  exec python3 maintenance/build/build {{nix_flags}} --show-trace "$@"
 
 run:
   nix run {{nix_flags}} .#microvm

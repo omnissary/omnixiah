@@ -36,24 +36,19 @@ in
       system,
       ...
     }:
-    let
-      inherit (pkgs)
-        git
-        jq
-        just
-        ;
-    in
     {
       checks = mkModuleChecks { inherit pkgs system; } // {
-        fork-sync = import ../maintenance/fork-sync/tests { inherit pkgs; };
-        package-update = import ../maintenance/package-update/tests { inherit pkgs; };
+        maintenance-build = import ../maintenance/build/tests { inherit pkgs; };
+        maintenance-fork-sync = import ../maintenance/fork-sync/tests { inherit pkgs; };
+        maintenance-package-update = import ../maintenance/package-update/tests { inherit pkgs; };
       };
 
       devShells.default = pkgs.mkShellNoCC {
-        packages = [
+        packages = with pkgs; [
           git
           just
           jq
+          python3
           config.treefmt.build.wrapper
         ];
       };
