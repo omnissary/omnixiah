@@ -26,6 +26,9 @@
       system
       ;
   };
+  overlay-order = import ./modules/overlay-order.nix {
+    inherit pkgs self system;
+  };
   fail2ban = import ./modules/fail2ban.nix {
     inherit
       inputs

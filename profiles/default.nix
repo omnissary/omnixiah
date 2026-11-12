@@ -42,7 +42,7 @@ in
       ];
       nixpkgs = {
         config.allowUnfree = mkDefault true;
-        overlays = map (entry: entry.flake.overlays.${entry.name}) cfg.overlays;
+        overlays = mkBefore (map (entry: entry.flake.overlays.${entry.name}) cfg.overlays);
       };
       omnixiah.nix = {
         overlays = mkBefore [ { flake = inputs.self; } ];
