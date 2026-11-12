@@ -1,0 +1,1150 @@
+From 13067d23d8b7cd4841d1a603c4456397fd3dec88 Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Tue, 2 Jun 2026 21:00:48 +0000
+Subject: [PATCH] support amnezia S3,S4,I1-I5 settings
+
+---
+ src/config.c                     | 174 +++++++++++++++++++++++++++----
+ src/containers.h                 |  37 ++++++-
+ src/ipc-freebsd.h                |  98 +++++++++++------
+ src/ipc-linux.h                  |  82 +++++++++++----
+ src/ipc-openbsd.h                | 164 +++++++++++++++++++++++++++--
+ src/ipc-uapi.h                   |  87 ++++++++++++++--
+ src/set.c                        |   2 +-
+ src/show.c                       |  84 ++++++++++++---
+ src/showconf.c                   |  22 +++-
+ src/uapi/linux/linux/wireguard.h |   7 ++
+ 10 files changed, 644 insertions(+), 113 deletions(-)
+
+diff --git a/src/config.c b/src/config.c
+index 07aa28d..45e0ae7 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -22,6 +22,12 @@
+ 
+ #define COMMENT_CHAR '#'
+ 
++/* Values for these keys may contain spaces, so only trim around '='. */
++static const char *awg_special_handshake_keys[] = {
++	"I1", "I2", "I3", "I4", "I5",
++	NULL
++};
++
+ static const char *get_value(const char *line, const char *key)
+ {
+ 	size_t linelen = strlen(line);
+@@ -452,21 +458,25 @@ static inline bool parse_uint16(uint16_t *device_value, const char *name, const
+ 	return true;
+ }
+ 
+-static inline bool parse_uint32(uint32_t *device_value, const char *name, const char *value) {
++static inline bool parse_awg_string(char **device_value, const char *name, const char *value)
++{
++	char *ret;
++	size_t len = strlen(value);
+ 
+-	if (!strlen(value)) {
+-		fprintf(stderr, "Unable to parse empty string\n");
++	if (len >= MAX_AWG_STRING_LEN) {
++		fprintf(stderr, "Unable to process string for %s; longer than %u\n",
++			name, MAX_AWG_STRING_LEN);
+ 		return false;
+ 	}
+ 
+-	char *end;
+-	uint64_t ret;
+-	ret = strtoul(value, &end, 10);
+-	if (*end || ret > UINT32_MAX) {
+-		fprintf(stderr, "Unable to parse %s: `%s'\n", name, value);
+-		exit(1);
++	ret = strdup(value);
++	if (!ret) {
++		perror("strdup");
++		return false;
+ 	}
+-	*device_value = (uint32_t)ret;
++
++	free(*device_value);
++	*device_value = ret;
+ 	return true;
+ }
+ 
+@@ -565,24 +575,53 @@ static bool process_line(struct config_ctx *ctx, const char *line)
+ 			ret = parse_uint16(&ctx->device->response_packet_junk_size, "S2", value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_S2;
++		} else if (key_match("S3")) {
++			ret = parse_uint16(&ctx->device->cookie_reply_packet_junk_size, "S3", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_S3;
++		} else if (key_match("S4")) {
++			ret = parse_uint16(&ctx->device->transport_packet_junk_size, "S4", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_S4;
+ 		} else if (key_match("H1")) {
+-			ret = parse_uint32(&ctx->device->init_packet_magic_header, "H1", value);
++			ret = parse_awg_string(&ctx->device->init_packet_magic_header, "H1", value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_H1;
+ 		} else if (key_match("H2")) {
+-			ret = parse_uint32(&ctx->device->response_packet_magic_header, "H2", value);
++			ret = parse_awg_string(&ctx->device->response_packet_magic_header, "H2", value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_H2;
+ 		} else if (key_match("H3")) {
+-			ret = parse_uint32(&ctx->device->underload_packet_magic_header, "H3", value);
++			ret = parse_awg_string(&ctx->device->underload_packet_magic_header, "H3", value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_H3;
+ 		} else if (key_match("H4")) {
+-			ret = parse_uint32(&ctx->device->transport_packet_magic_header, "H4", value);
++			ret = parse_awg_string(&ctx->device->transport_packet_magic_header, "H4", value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_H4;
+-		} else
++		} else if (key_match("I1")) {
++			ret = parse_awg_string(&ctx->device->i1, "I1", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_I1;
++		} else if (key_match("I2")) {
++			ret = parse_awg_string(&ctx->device->i2, "I2", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_I2;
++		} else if (key_match("I3")) {
++			ret = parse_awg_string(&ctx->device->i3, "I3", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_I3;
++		} else if (key_match("I4")) {
++			ret = parse_awg_string(&ctx->device->i4, "I4", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_I4;
++		} else if (key_match("I5")) {
++			ret = parse_awg_string(&ctx->device->i5, "I5", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_I5;
++		} else {
+ 			goto error;
++		}
+ 	} else if (ctx->is_peer_section) {
+ 		if (key_match("Endpoint"))
+ 			ret = parse_endpoint(&ctx->last_peer->endpoint.addr, value);
+@@ -635,9 +674,51 @@ bool config_read_line(struct config_ctx *ctx, const char *input)
+ 		goto out;
+ 	}
+ 
+-	for (size_t i = 0; i < len; ++i) {
+-		if (!char_is_space(input[i]))
+-			line[cleaned_len++] = input[i];
++	bool special_handshake_key = false;
++	const char *input_key = input;
++
++	while (char_is_space(*input_key))
++		++input_key;
++	for (size_t i = 0; awg_special_handshake_keys[i]; ++i) {
++		if (!strncasecmp(input_key, awg_special_handshake_keys[i], 2)) {
++			special_handshake_key = true;
++			break;
++		}
++	}
++
++	if (special_handshake_key) {
++		size_t value_end = 0;
++		bool found_equals = false, found_value_start = false;
++
++		for (size_t i = len; i > 0; --i) {
++			if (!char_is_space(input[i - 1])) {
++				value_end = i;
++				break;
++			}
++		}
++
++		for (size_t i = 0; i < value_end; ++i) {
++			if (!found_equals) {
++				if (input[i] == '=') {
++					line[cleaned_len++] = input[i];
++					found_equals = true;
++				} else if (!char_is_space(input[i])) {
++					line[cleaned_len++] = input[i];
++				}
++			} else if (!found_value_start) {
++				if (!char_is_space(input[i])) {
++					line[cleaned_len++] = input[i];
++					found_value_start = true;
++				}
++			} else {
++				line[cleaned_len++] = input[i];
++			}
++		}
++	} else {
++		for (size_t i = 0; i < len; ++i) {
++			if (!char_is_space(input[i]))
++				line[cleaned_len++] = input[i];
++		}
+ 	}
+ 	if (!cleaned_len)
+ 		goto out;
+@@ -758,34 +839,83 @@ struct wgdevice *config_read_cmd(const char *argv[], int argc)
+ 			device->flags |= WGDEVICE_HAS_S2;
+ 			argv += 2;
+ 			argc -= 2;
++		} else if (!strcmp(argv[0], "s3") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->cookie_reply_packet_junk_size, "s3", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_S3;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "s4") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->transport_packet_junk_size, "s4", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_S4;
++			argv += 2;
++			argc -= 2;
+ 		} else if (!strcmp(argv[0], "h1") && argc >= 2 && !peer) {
+-			if (!parse_uint32(&device->init_packet_magic_header, "h1", argv[1]))
++			if (!parse_awg_string(&device->init_packet_magic_header, "h1", argv[1]))
+ 				goto error;
+ 			
+ 			device->flags |= WGDEVICE_HAS_H1;
+ 			argv += 2;
+ 			argc -= 2;
+ 		} else if (!strcmp(argv[0], "h2") && argc >= 2 && !peer) {
+-			if (!parse_uint32(&device->response_packet_magic_header, "h2", argv[1]))
++			if (!parse_awg_string(&device->response_packet_magic_header, "h2", argv[1]))
+ 				goto error;
+ 			
+ 			device->flags |= WGDEVICE_HAS_H2;
+ 			argv += 2;
+ 			argc -= 2;
+ 		} else if (!strcmp(argv[0], "h3") && argc >= 2 && !peer) {
+-			if (!parse_uint32(&device->underload_packet_magic_header, "h3", argv[1]))
++			if (!parse_awg_string(&device->underload_packet_magic_header, "h3", argv[1]))
+ 				goto error;
+ 			
+ 			device->flags |= WGDEVICE_HAS_H3;
+ 			argv += 2;
+ 			argc -= 2;
+ 		} else if (!strcmp(argv[0], "h4") && argc >= 2 && !peer) {
+-			if (!parse_uint32(&device->transport_packet_magic_header, "h4", argv[1]))
++			if (!parse_awg_string(&device->transport_packet_magic_header, "h4", argv[1]))
+ 				goto error;
+ 			
+ 			device->flags |= WGDEVICE_HAS_H4;
+ 			argv += 2;
+ 			argc -= 2;
++		} else if (!strcmp(argv[0], "i1") && argc >= 2 && !peer) {
++			if (!parse_awg_string(&device->i1, "i1", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_I1;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "i2") && argc >= 2 && !peer) {
++			if (!parse_awg_string(&device->i2, "i2", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_I2;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "i3") && argc >= 2 && !peer) {
++			if (!parse_awg_string(&device->i3, "i3", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_I3;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "i4") && argc >= 2 && !peer) {
++			if (!parse_awg_string(&device->i4, "i4", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_I4;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "i5") && argc >= 2 && !peer) {
++			if (!parse_awg_string(&device->i5, "i5", argv[1]))
++				goto error;
++
++			device->flags |= WGDEVICE_HAS_I5;
++			argv += 2;
++			argc -= 2;
+ 		} else if (!strcmp(argv[0], "peer") && argc >= 2) {
+ 			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+ 
+diff --git a/src/containers.h b/src/containers.h
+index 82145f7..1b55ac6 100644
+--- a/src/containers.h
++++ b/src/containers.h
+@@ -23,6 +23,10 @@
+ #define WG_KEY_LEN 32
+ #endif
+ 
++#ifndef MAX_AWG_STRING_LEN
++#define MAX_AWG_STRING_LEN (5 * 1024)
++#endif
++
+ /* Cross platform __kernel_timespec */
+ struct timespec64 {
+ 	int64_t tv_sec;
+@@ -89,7 +93,14 @@ enum {
+ 	WGDEVICE_HAS_H1 = 1U << 10,
+ 	WGDEVICE_HAS_H2 = 1U << 11,
+ 	WGDEVICE_HAS_H3 = 1U << 12,
+-	WGDEVICE_HAS_H4 = 1U << 13
++	WGDEVICE_HAS_H4 = 1U << 13,
++	WGDEVICE_HAS_S3 = 1U << 14,
++	WGDEVICE_HAS_S4 = 1U << 15,
++	WGDEVICE_HAS_I1 = 1U << 16,
++	WGDEVICE_HAS_I2 = 1U << 17,
++	WGDEVICE_HAS_I3 = 1U << 18,
++	WGDEVICE_HAS_I4 = 1U << 19,
++	WGDEVICE_HAS_I5 = 1U << 20
+ };
+ 
+ struct wgdevice {
+@@ -111,10 +122,17 @@ struct wgdevice {
+ 	uint16_t junk_packet_max_size;
+ 	uint16_t init_packet_junk_size;
+ 	uint16_t response_packet_junk_size;
+-	uint32_t init_packet_magic_header;
+-	uint32_t response_packet_magic_header;
+-	uint32_t underload_packet_magic_header;
+-	uint32_t transport_packet_magic_header;
++	uint16_t cookie_reply_packet_junk_size;
++	uint16_t transport_packet_junk_size;
++	char *init_packet_magic_header;
++	char *response_packet_magic_header;
++	char *underload_packet_magic_header;
++	char *transport_packet_magic_header;
++	char *i1;
++	char *i2;
++	char *i3;
++	char *i4;
++	char *i5;
+ };
+ 
+ #define for_each_wgpeer(__dev, __peer) for ((__peer) = (__dev)->first_peer; (__peer); (__peer) = (__peer)->next_peer)
+@@ -129,6 +147,15 @@ static inline void free_wgdevice(struct wgdevice *dev)
+ 			free(allowedip);
+ 		free(peer);
+ 	}
++	free(dev->init_packet_magic_header);
++	free(dev->response_packet_magic_header);
++	free(dev->underload_packet_magic_header);
++	free(dev->transport_packet_magic_header);
++	free(dev->i1);
++	free(dev->i2);
++	free(dev->i3);
++	free(dev->i4);
++	free(dev->i5);
+ 	free(dev);
+ }
+ 
+diff --git a/src/ipc-freebsd.h b/src/ipc-freebsd.h
+index 926ac63..bcf4ab7 100644
+--- a/src/ipc-freebsd.h
++++ b/src/ipc-freebsd.h
+@@ -19,6 +19,25 @@ static int get_dgram_socket(void)
+ 	return sock;
+ }
+ 
++static int nvlist_get_awg_string(const nvlist_t *nvl, const char *name, char **out)
++{
++	const void *binary;
++	size_t size;
++
++	if (!nvlist_exists_binary(nvl, name))
++		return 0;
++
++	binary = nvlist_get_binary(nvl, name, &size);
++	if (!binary || !size || size > MAX_AWG_STRING_LEN || ((const char *)binary)[size - 1])
++		return 0;
++
++	*out = strdup((const char *)binary);
++	if (!*out)
++		return -ENOMEM;
++
++	return 1;
++}
++
+ static int kernel_get_wireguard_interfaces(struct string_list *list)
+ {
+ 	struct ifgroupreq ifgr = { .ifgr_name = "wg" };
+@@ -126,34 +145,37 @@ static int kernel_get_device(struct wgdevice **device, const char *ifname)
+ 			dev->flags |= WGDEVICE_HAS_S2;
+ 		}			
+ 	}
+-	if (nvlist_exists_number(nvl_device, "h1")) {		
+-		number = nvlist_get_number(nvl_device, "h1");
+-		if (number <= UINT32_MAX){
+-			dev->init_packet_magic_header = number;			
+-			dev->flags |= WGDEVICE_HAS_H1;
+-		}			
++	if (nvlist_exists_number(nvl_device, "s3")) {
++		number = nvlist_get_number(nvl_device, "s3");
++		if (number <= UINT16_MAX) {
++			dev->cookie_reply_packet_junk_size = number;
++			dev->flags |= WGDEVICE_HAS_S3;
++		}
+ 	}
+-	if (nvlist_exists_number(nvl_device, "h2")) {		
+-		number = nvlist_get_number(nvl_device, "h2");
+-		if (number <= UINT32_MAX){
+-			dev->response_packet_magic_header = number;			
+-			dev->flags |= WGDEVICE_HAS_H2;
+-		}			
+-	}
+-	if (nvlist_exists_number(nvl_device, "h3")) {		
+-		number = nvlist_get_number(nvl_device, "h3");
+-		if (number <= UINT32_MAX){
+-			dev->underload_packet_magic_header = number;			
+-			dev->flags |= WGDEVICE_HAS_H3;
+-		}			
+-	}
+-	if (nvlist_exists_number(nvl_device, "h4")) {		
+-		number = nvlist_get_number(nvl_device, "h4");
+-		if (number <= UINT32_MAX){
+-			dev->transport_packet_magic_header = number;			
+-			dev->flags |= WGDEVICE_HAS_H4;
+-		}			
++	if (nvlist_exists_number(nvl_device, "s4")) {
++		number = nvlist_get_number(nvl_device, "s4");
++		if (number <= UINT16_MAX) {
++			dev->transport_packet_junk_size = number;
++			dev->flags |= WGDEVICE_HAS_S4;
++		}
+ 	}
++#define parse_string(name, field, flag) do { \
++	ret = nvlist_get_awg_string(nvl_device, name, &dev->field); \
++	if (ret < 0) \
++		goto err; \
++	if (ret) \
++		dev->flags |= flag; \
++} while (0)
++	parse_string("h1", init_packet_magic_header, WGDEVICE_HAS_H1);
++	parse_string("h2", response_packet_magic_header, WGDEVICE_HAS_H2);
++	parse_string("h3", underload_packet_magic_header, WGDEVICE_HAS_H3);
++	parse_string("h4", transport_packet_magic_header, WGDEVICE_HAS_H4);
++	parse_string("i1", i1, WGDEVICE_HAS_I1);
++	parse_string("i2", i2, WGDEVICE_HAS_I2);
++	parse_string("i3", i3, WGDEVICE_HAS_I3);
++	parse_string("i4", i4, WGDEVICE_HAS_I4);
++	parse_string("i5", i5, WGDEVICE_HAS_I5);
++#undef parse_string
+ 
+ 	if (nvlist_exists_number(nvl_device, "user-cookie")) {
+ 		number = nvlist_get_number(nvl_device, "user-cookie");
+@@ -306,7 +328,7 @@ err:
+ 		ret = -errno;
+ 	free(wgd.wgd_data);
+ 	nvlist_destroy(nvl_device);
+-	free(dev);
++	free_wgdevice(dev);
+ 	return ret;
+ }
+ 
+@@ -346,14 +368,28 @@ static int kernel_set_device(struct wgdevice *dev)
+ 		nvlist_add_number(nvl_device, "s1", dev->init_packet_junk_size);
+ 	if (dev->flags & WGDEVICE_HAS_S2)
+ 		nvlist_add_number(nvl_device, "s2", dev->response_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S3)
++		nvlist_add_number(nvl_device, "s3", dev->cookie_reply_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S4)
++		nvlist_add_number(nvl_device, "s4", dev->transport_packet_junk_size);
+ 	if (dev->flags & WGDEVICE_HAS_H1)
+-		nvlist_add_number(nvl_device, "h1", dev->init_packet_magic_header);
++		nvlist_add_binary(nvl_device, "h1", dev->init_packet_magic_header, strlen(dev->init_packet_magic_header) + 1);
+ 	if (dev->flags & WGDEVICE_HAS_H2)
+-		nvlist_add_number(nvl_device, "h2", dev->response_packet_magic_header);
++		nvlist_add_binary(nvl_device, "h2", dev->response_packet_magic_header, strlen(dev->response_packet_magic_header) + 1);
+ 	if (dev->flags & WGDEVICE_HAS_H3)
+-		nvlist_add_number(nvl_device, "h3", dev->underload_packet_magic_header);
++		nvlist_add_binary(nvl_device, "h3", dev->underload_packet_magic_header, strlen(dev->underload_packet_magic_header) + 1);
+ 	if (dev->flags & WGDEVICE_HAS_H4)
+-		nvlist_add_number(nvl_device, "h4", dev->transport_packet_magic_header);
++		nvlist_add_binary(nvl_device, "h4", dev->transport_packet_magic_header, strlen(dev->transport_packet_magic_header) + 1);
++	if (dev->flags & WGDEVICE_HAS_I1)
++		nvlist_add_binary(nvl_device, "i1", dev->i1, strlen(dev->i1) + 1);
++	if (dev->flags & WGDEVICE_HAS_I2)
++		nvlist_add_binary(nvl_device, "i2", dev->i2, strlen(dev->i2) + 1);
++	if (dev->flags & WGDEVICE_HAS_I3)
++		nvlist_add_binary(nvl_device, "i3", dev->i3, strlen(dev->i3) + 1);
++	if (dev->flags & WGDEVICE_HAS_I4)
++		nvlist_add_binary(nvl_device, "i4", dev->i4, strlen(dev->i4) + 1);
++	if (dev->flags & WGDEVICE_HAS_I5)
++		nvlist_add_binary(nvl_device, "i5", dev->i5, strlen(dev->i5) + 1);
+ 	if (dev->flags & WGDEVICE_HAS_FWMARK)
+ 		nvlist_add_number(nvl_device, "user-cookie", dev->fwmark);
+ 	if (dev->flags & WGDEVICE_REPLACE_PEERS)
+diff --git a/src/ipc-linux.h b/src/ipc-linux.h
+index 49e0b04..986240d 100644
+--- a/src/ipc-linux.h
++++ b/src/ipc-linux.h
+@@ -173,14 +173,28 @@ again:
+ 			mnl_attr_put_u16(nlh, WGDEVICE_A_S1, dev->init_packet_junk_size);
+ 		if (dev->flags & WGDEVICE_HAS_S2)
+ 			mnl_attr_put_u16(nlh, WGDEVICE_A_S2, dev->response_packet_junk_size);
++		if (dev->flags & WGDEVICE_HAS_S3)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_S3, dev->cookie_reply_packet_junk_size);
++		if (dev->flags & WGDEVICE_HAS_S4)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_S4, dev->transport_packet_junk_size);
+ 		if (dev->flags & WGDEVICE_HAS_H1)
+-			mnl_attr_put_u32(nlh, WGDEVICE_A_H1, dev->init_packet_magic_header);
++			mnl_attr_put_strz(nlh, WGDEVICE_A_H1, dev->init_packet_magic_header);
+ 		if (dev->flags & WGDEVICE_HAS_H2)
+-			mnl_attr_put_u32(nlh, WGDEVICE_A_H2, dev->response_packet_magic_header);
++			mnl_attr_put_strz(nlh, WGDEVICE_A_H2, dev->response_packet_magic_header);
+ 		if (dev->flags & WGDEVICE_HAS_H3)
+-			mnl_attr_put_u32(nlh, WGDEVICE_A_H3, dev->underload_packet_magic_header);
++			mnl_attr_put_strz(nlh, WGDEVICE_A_H3, dev->underload_packet_magic_header);
+ 		if (dev->flags & WGDEVICE_HAS_H4)
+-			mnl_attr_put_u32(nlh, WGDEVICE_A_H4, dev->transport_packet_magic_header);
++			mnl_attr_put_strz(nlh, WGDEVICE_A_H4, dev->transport_packet_magic_header);
++		if (dev->flags & WGDEVICE_HAS_I1)
++			mnl_attr_put_strz(nlh, WGDEVICE_A_I1, dev->i1);
++		if (dev->flags & WGDEVICE_HAS_I2)
++			mnl_attr_put_strz(nlh, WGDEVICE_A_I2, dev->i2);
++		if (dev->flags & WGDEVICE_HAS_I3)
++			mnl_attr_put_strz(nlh, WGDEVICE_A_I3, dev->i3);
++		if (dev->flags & WGDEVICE_HAS_I4)
++			mnl_attr_put_strz(nlh, WGDEVICE_A_I4, dev->i4);
++		if (dev->flags & WGDEVICE_HAS_I5)
++			mnl_attr_put_strz(nlh, WGDEVICE_A_I5, dev->i5);
+ 		if (dev->flags & WGDEVICE_HAS_FWMARK)
+ 			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
+ 		if (dev->flags & WGDEVICE_REPLACE_PEERS)
+@@ -450,6 +464,17 @@ static int parse_device(const struct nlattr *attr, void *data)
+ {
+ 	struct wgdevice *device = data;
+ 
++#define parse_string_attr(field, flag) do { \
++	if (!mnl_attr_validate(attr, MNL_TYPE_NUL_STRING)) { \
++		device->field = strdup(mnl_attr_get_str(attr)); \
++		if (!device->field) { \
++			perror("strdup"); \
++			return MNL_CB_ERROR; \
++		} \
++		device->flags |= flag; \
++	} \
++} while (0)
++
+ 	switch (mnl_attr_get_type(attr)) {
+ 	case WGDEVICE_A_UNSPEC:
+ 		break;
+@@ -515,32 +540,49 @@ static int parse_device(const struct nlattr *attr, void *data)
+ 			device->flags |= WGDEVICE_HAS_S2;
+ 		}
+ 		break;
+-	case WGDEVICE_A_H1:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
+-			device->init_packet_magic_header = mnl_attr_get_u32(attr);
+-			device->flags |= WGDEVICE_HAS_H1;
++	case WGDEVICE_A_S3:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->cookie_reply_packet_junk_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_S3;
+ 		}
+ 		break;
++	case WGDEVICE_A_S4:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->transport_packet_junk_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_S4;
++		}
++		break;
++	case WGDEVICE_A_H1:
++		parse_string_attr(init_packet_magic_header, WGDEVICE_HAS_H1);
++		break;
+ 	case WGDEVICE_A_H2:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
+-			device->response_packet_magic_header = mnl_attr_get_u32(attr);
+-			device->flags |= WGDEVICE_HAS_H2;
+-		}
++		parse_string_attr(response_packet_magic_header, WGDEVICE_HAS_H2);
+ 		break;
+ 	case WGDEVICE_A_H3:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
+-			device->underload_packet_magic_header = mnl_attr_get_u32(attr);
+-			device->flags |= WGDEVICE_HAS_H3;
+-		}
++		parse_string_attr(underload_packet_magic_header, WGDEVICE_HAS_H3);
+ 		break;
+ 	case WGDEVICE_A_H4:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
+-			device->transport_packet_magic_header = mnl_attr_get_u32(attr);
+-			device->flags |= WGDEVICE_HAS_H4;
+-		}
++		parse_string_attr(transport_packet_magic_header, WGDEVICE_HAS_H4);
++		break;
++	case WGDEVICE_A_I1:
++		parse_string_attr(i1, WGDEVICE_HAS_I1);
++		break;
++	case WGDEVICE_A_I2:
++		parse_string_attr(i2, WGDEVICE_HAS_I2);
++		break;
++	case WGDEVICE_A_I3:
++		parse_string_attr(i3, WGDEVICE_HAS_I3);
++		break;
++	case WGDEVICE_A_I4:
++		parse_string_attr(i4, WGDEVICE_HAS_I4);
++		break;
++	case WGDEVICE_A_I5:
++		parse_string_attr(i5, WGDEVICE_HAS_I5);
+ 		break;
+ 	}
+ 
++#undef parse_string_attr
++
+ 	return MNL_CB_OK;
+ }
+ 
+diff --git a/src/ipc-openbsd.h b/src/ipc-openbsd.h
+index 5f215a1..972b831 100644
+--- a/src/ipc-openbsd.h
++++ b/src/ipc-openbsd.h
+@@ -64,7 +64,7 @@ static int kernel_get_device(struct wgdevice **device, const char *iface)
+ 	struct wg_interface_io *wg_iface;
+ 	struct wg_peer_io *wg_peer;
+ 	struct wg_aip_io *wg_aip;
+-	struct wgdevice *dev;
++	struct wgdevice *dev = NULL;
+ 	struct wgpeer *peer;
+ 	struct wgallowedip *aip;
+ 	int s = get_dgram_socket(), ret;
+@@ -135,25 +135,87 @@ static int kernel_get_device(struct wgdevice **device, const char *iface)
+ 		dev->flags |= WGDEVICE_HAS_S2;
+ 	}
+ 
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_S3) {
++		dev->cookie_reply_packet_junk_size = wg_iface->i_cookie_reply_packet_junk_size;
++		dev->flags |= WGDEVICE_HAS_S3;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_S4) {
++		dev->transport_packet_junk_size = wg_iface->i_transport_packet_junk_size;
++		dev->flags |= WGDEVICE_HAS_S4;
++	}
++
+ 	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H1) {
+-		dev->init_packet_magic_header = wg_iface->i_init_packet_magic_header;
++		dev->init_packet_magic_header = strdup(wg_iface->i_init_packet_magic_header);
++		if (!dev->init_packet_magic_header)
++			goto out;
++
+ 		dev->flags |= WGDEVICE_HAS_H1;
+ 	}
+ 
+ 	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H2) {
+-		dev->response_packet_magic_header = wg_iface->i_response_packet_magic_header;
++		dev->response_packet_magic_header = strdup(wg_iface->i_response_packet_magic_header);
++		if (!dev->response_packet_magic_header)
++			goto out;
++
+ 		dev->flags |= WGDEVICE_HAS_H2;
+ 	}
+ 
+ 	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H3) {
+-		dev->underload_packet_magic_header = wg_iface->i_underload_packet_magic_header;
++		dev->underload_packet_magic_header = strdup(wg_iface->i_underload_packet_magic_header);
++		if (!dev->underload_packet_magic_header)
++			goto out;
++
+ 		dev->flags |= WGDEVICE_HAS_H3;
+ 	}
+ 
+ 	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H4) {
+-		dev->transport_packet_magic_header = wg_iface->i_transport_packet_magic_header;
++		dev->transport_packet_magic_header = strdup(wg_iface->i_transport_packet_magic_header);
++		if (!dev->transport_packet_magic_header)
++			goto out;
++
+ 		dev->flags |= WGDEVICE_HAS_H4;
+ 	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I1) {
++		dev->i1 = strdup(wg_iface->i_i1);
++		if (!dev->i1)
++			goto out;
++
++		dev->flags |= WGDEVICE_HAS_I1;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I2) {
++		dev->i2 = strdup(wg_iface->i_i2);
++		if (!dev->i2)
++			goto out;
++
++		dev->flags |= WGDEVICE_HAS_I2;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I3) {
++		dev->i3 = strdup(wg_iface->i_i3);
++		if (!dev->i3)
++			goto out;
++
++		dev->flags |= WGDEVICE_HAS_I3;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I4) {
++		dev->i4 = strdup(wg_iface->i_i4);
++		if (!dev->i4)
++			goto out;
++
++		dev->flags |= WGDEVICE_HAS_I4;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I5) {
++		dev->i5 = strdup(wg_iface->i_i5);
++		if (!dev->i5)
++			goto out;
++
++		dev->flags |= WGDEVICE_HAS_I5;
++	}
+ 	
+ 	wg_peer = &wg_iface->i_peers[0];
+ 	for (size_t i = 0; i < wg_iface->i_peers_count; ++i) {
+@@ -221,6 +283,8 @@ static int kernel_get_device(struct wgdevice **device, const char *iface)
+ out:
+ 	ret = -errno;
+ 	free(wgdata.wgd_interface);
++	if (ret)
++		free_wgdevice(dev);
+ 	return ret;
+ }
+ 
+@@ -292,26 +356,88 @@ static int kernel_set_device(struct wgdevice *dev)
+ 		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_S2;
+ 	}
+ 
++	if (dev->flags & WGDEVICE_HAS_S3) {
++		wg_iface->i_cookie_reply_packet_junk_size = dev->cookie_reply_packet_junk_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_S3;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_S4) {
++		wg_iface->i_transport_packet_junk_size = dev->transport_packet_junk_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_S4;
++	}
++
+ 	if (dev->flags & WGDEVICE_HAS_H1) {
+-		wg_iface->i_init_packet_magic_header = dev->init_packet_magic_header;
++		wg_iface->i_init_packet_magic_header = strdup(dev->init_packet_magic_header);
++		if (!wg_iface->i_init_packet_magic_header)
++			goto out;
++
+ 		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H1;
+ 	}
+ 
+ 	if (dev->flags & WGDEVICE_HAS_H2) {
+-		wg_iface->i_response_packet_magic_header = dev->response_packet_magic_header;
++		wg_iface->i_response_packet_magic_header = strdup(dev->response_packet_magic_header);
++		if (!wg_iface->i_response_packet_magic_header)
++			goto out;
++
+ 		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H2;
+ 	}
+ 
+ 	if (dev->flags & WGDEVICE_HAS_H3) {
+-		wg_iface->i_underload_packet_magic_header = dev->underload_packet_magic_header;
++		wg_iface->i_underload_packet_magic_header = strdup(dev->underload_packet_magic_header);
++		if (!wg_iface->i_underload_packet_magic_header)
++			goto out;
++
+ 		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H3;
+ 	}
+ 
+ 	if (dev->flags & WGDEVICE_HAS_H4) {
+-		wg_iface->i_transport_packet_magic_header = dev->transport_packet_magic_header;
++		wg_iface->i_transport_packet_magic_header = strdup(dev->transport_packet_magic_header);
++		if (!wg_iface->i_transport_packet_magic_header)
++			goto out;
++
+ 		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H4;
+ 	}
+ 
++	if (dev->flags & WGDEVICE_HAS_I1) {
++		wg_iface->i_i1 = strdup(dev->i1);
++		if (!wg_iface->i_i1)
++			goto out;
++
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_I1;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_I2) {
++		wg_iface->i_i2 = strdup(dev->i2);
++		if (!wg_iface->i_i2)
++			goto out;
++
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_I2;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_I3) {
++		wg_iface->i_i3 = strdup(dev->i3);
++		if (!wg_iface->i_i3)
++			goto out;
++
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_I3;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_I4) {
++		wg_iface->i_i4 = strdup(dev->i4);
++		if (!wg_iface->i_i4)
++			goto out;
++
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_I4;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_I5) {
++		wg_iface->i_i5 = strdup(dev->i5);
++		if (!wg_iface->i_i5)
++			goto out;
++
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_I5;
++	}
++
+ 	peer_count = 0;
+ 	wg_peer = &wg_iface->i_peers[0];
+ 	for_each_wgpeer(dev, peer) {
+@@ -372,6 +498,26 @@ static int kernel_set_device(struct wgdevice *dev)
+ 
+ out:
+ 	ret = -errno;
++	if (wg_iface) {
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H1)
++			free(wg_iface->i_init_packet_magic_header);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H2)
++			free(wg_iface->i_response_packet_magic_header);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H3)
++			free(wg_iface->i_underload_packet_magic_header);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H4)
++			free(wg_iface->i_transport_packet_magic_header);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I1)
++			free(wg_iface->i_i1);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I2)
++			free(wg_iface->i_i2);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I3)
++			free(wg_iface->i_i3);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I4)
++			free(wg_iface->i_i4);
++		if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_I5)
++			free(wg_iface->i_i5);
++	}
+ 	free(wgdata.wgd_interface);
+ 	return ret;
+ }
+diff --git a/src/ipc-uapi.h b/src/ipc-uapi.h
+index 9fa62a9..7f21639 100644
+--- a/src/ipc-uapi.h
++++ b/src/ipc-uapi.h
+@@ -61,14 +61,28 @@ static int userspace_set_device(struct wgdevice *dev)
+ 		fprintf(f, "s1=%u\n", dev->init_packet_junk_size);
+ 	if (dev->flags & WGDEVICE_HAS_S2)
+ 		fprintf(f, "s2=%u\n", dev->response_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S3)
++		fprintf(f, "s3=%u\n", dev->cookie_reply_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S4)
++		fprintf(f, "s4=%u\n", dev->transport_packet_junk_size);
+ 	if (dev->flags & WGDEVICE_HAS_H1)
+-		fprintf(f, "h1=%u\n", dev->init_packet_magic_header);
++		fprintf(f, "h1=%s\n", dev->init_packet_magic_header);
+ 	if (dev->flags & WGDEVICE_HAS_H2)
+-		fprintf(f, "h2=%u\n", dev->response_packet_magic_header);
++		fprintf(f, "h2=%s\n", dev->response_packet_magic_header);
+ 	if (dev->flags & WGDEVICE_HAS_H3)
+-		fprintf(f, "h3=%u\n", dev->underload_packet_magic_header);
++		fprintf(f, "h3=%s\n", dev->underload_packet_magic_header);
+ 	if (dev->flags & WGDEVICE_HAS_H4)
+-		fprintf(f, "h4=%u\n", dev->transport_packet_magic_header);
++		fprintf(f, "h4=%s\n", dev->transport_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_I1)
++		fprintf(f, "i1=%s\n", dev->i1);
++	if (dev->flags & WGDEVICE_HAS_I2)
++		fprintf(f, "i2=%s\n", dev->i2);
++	if (dev->flags & WGDEVICE_HAS_I3)
++		fprintf(f, "i3=%s\n", dev->i3);
++	if (dev->flags & WGDEVICE_HAS_I4)
++		fprintf(f, "i4=%s\n", dev->i4);
++	if (dev->flags & WGDEVICE_HAS_I5)
++		fprintf(f, "i5=%s\n", dev->i5);
+ 
+ 	for_each_wgpeer(dev, peer) {
+ 		key_to_hex(hex, peer->public_key);
+@@ -220,18 +234,75 @@ static int userspace_get_device(struct wgdevice **out, const char *iface)
+ 		} else if(!peer && !strcmp(key, "s2")) {
+ 			dev->response_packet_junk_size = NUM(0xffffU);
+ 			dev->flags |= WGDEVICE_HAS_S2;
++		} else if(!peer && !strcmp(key, "s3")) {
++			dev->cookie_reply_packet_junk_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_S3;
++		} else if(!peer && !strcmp(key, "s4")) {
++			dev->transport_packet_junk_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_S4;
+ 		} else if(!peer && !strcmp(key, "h1")) {
+-			dev->init_packet_magic_header = NUM(0xffffffffU);
++			dev->init_packet_magic_header = strdup(value);
++			if (!dev->init_packet_magic_header) {
++				ret = -ENOMEM;
++				goto err;
++			}
+ 			dev->flags |= WGDEVICE_HAS_H1;
+ 		} else if(!peer && !strcmp(key, "h2")) {
+-			dev->response_packet_magic_header = NUM(0xffffffffU);
++			dev->response_packet_magic_header = strdup(value);
++			if (!dev->response_packet_magic_header) {
++				ret = -ENOMEM;
++				goto err;
++			}
+ 			dev->flags |= WGDEVICE_HAS_H2;
+ 		} else if(!peer && !strcmp(key, "h3")) {
+-			dev->underload_packet_magic_header = NUM(0xffffffffU);
++			dev->underload_packet_magic_header = strdup(value);
++			if (!dev->underload_packet_magic_header) {
++				ret = -ENOMEM;
++				goto err;
++			}
+ 			dev->flags |= WGDEVICE_HAS_H3;
+ 		} else if(!peer && !strcmp(key, "h4")) {
+-			dev->transport_packet_magic_header = NUM(0xffffffffU);
++			dev->transport_packet_magic_header = strdup(value);
++			if (!dev->transport_packet_magic_header) {
++				ret = -ENOMEM;
++				goto err;
++			}
+ 			dev->flags |= WGDEVICE_HAS_H4;
++		} else if(!peer && !strcmp(key, "i1")) {
++			dev->i1 = strdup(value);
++			if (!dev->i1) {
++				ret = -ENOMEM;
++				goto err;
++			}
++			dev->flags |= WGDEVICE_HAS_I1;
++		} else if(!peer && !strcmp(key, "i2")) {
++			dev->i2 = strdup(value);
++			if (!dev->i2) {
++				ret = -ENOMEM;
++				goto err;
++			}
++			dev->flags |= WGDEVICE_HAS_I2;
++		} else if(!peer && !strcmp(key, "i3")) {
++			dev->i3 = strdup(value);
++			if (!dev->i3) {
++				ret = -ENOMEM;
++				goto err;
++			}
++			dev->flags |= WGDEVICE_HAS_I3;
++		} else if(!peer && !strcmp(key, "i4")) {
++			dev->i4 = strdup(value);
++			if (!dev->i4) {
++				ret = -ENOMEM;
++				goto err;
++			}
++			dev->flags |= WGDEVICE_HAS_I4;
++		} else if(!peer && !strcmp(key, "i5")) {
++			dev->i5 = strdup(value);
++			if (!dev->i5) {
++				ret = -ENOMEM;
++				goto err;
++			}
++			dev->flags |= WGDEVICE_HAS_I5;
+ 		} else if (!strcmp(key, "public_key")) {
+ 			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+ 
+diff --git a/src/set.c b/src/set.c
+index 9324f91..946f3f4 100644
+--- a/src/set.c
++++ b/src/set.c
+@@ -18,7 +18,7 @@ int set_main(int argc, const char *argv[])
+ 	int ret = 1;
+ 
+ 	if (argc < 3) {
+-		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>] [advanced-security <on|off>]...] ]...\n", PROG_NAME, argv[0]);
++		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [jc <junk_count>] [jmin <min_value>] [jmax <max_value>] [s1 <init_junk>] [s2 <resp_junk>] [s3 <cookie_junk>] [s4 <trans_junk>] [h1 <init_header>] [h2 <resp_header>] [h3 <cookie_header>] [h4 <transp_header>] [i1 \"<tagged_junk>\"] [i2 \"<tagged_junk>\"] [i3 \"<tagged_junk>\"] [i4 \"<tagged_junk>\"] [i5 \"<tagged_junk>\"] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>] [advanced-security <on|off>]...] ]...\n", PROG_NAME, argv[0]);
+ 		return 1;
+ 	}
+ 
+diff --git a/src/show.c b/src/show.c
+index 001ca1d..0b4d7a2 100644
+--- a/src/show.c
++++ b/src/show.c
+@@ -202,7 +202,7 @@ static char *bytes(uint64_t b)
+ static const char *COMMAND_NAME;
+ static void show_usage(void)
+ {
+-	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump]\n", PROG_NAME, COMMAND_NAME);
++	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump | jc | jmin | jmax | s1 | s2 | s3 | s4 | h1 | h2 | h3 | h4 | i1 | i2 | i3 | i4 | i5]\n", PROG_NAME, COMMAND_NAME);
+ }
+ 
+ static void pretty_print(struct wgdevice *device)
+@@ -230,14 +230,28 @@ static void pretty_print(struct wgdevice *device)
+ 		terminal_printf("  " TERMINAL_BOLD "s1" TERMINAL_RESET ": %u\n", device->init_packet_junk_size);
+ 	if (device->response_packet_junk_size)
+ 		terminal_printf("  " TERMINAL_BOLD "s2" TERMINAL_RESET ": %u\n", device->response_packet_junk_size);
++	if (device->cookie_reply_packet_junk_size)
++		terminal_printf("  " TERMINAL_BOLD "s3" TERMINAL_RESET ": %u\n", device->cookie_reply_packet_junk_size);
++	if (device->transport_packet_junk_size)
++		terminal_printf("  " TERMINAL_BOLD "s4" TERMINAL_RESET ": %u\n", device->transport_packet_junk_size);
+ 	if (device->init_packet_magic_header)
+-		terminal_printf("  " TERMINAL_BOLD "h1" TERMINAL_RESET ": %u\n", device->init_packet_magic_header);
++		terminal_printf("  " TERMINAL_BOLD "h1" TERMINAL_RESET ": %s\n", device->init_packet_magic_header);
+ 	if (device->response_packet_magic_header)
+-		terminal_printf("  " TERMINAL_BOLD "h2" TERMINAL_RESET ": %u\n", device->response_packet_magic_header);
++		terminal_printf("  " TERMINAL_BOLD "h2" TERMINAL_RESET ": %s\n", device->response_packet_magic_header);
+ 	if (device->underload_packet_magic_header)
+-		terminal_printf("  " TERMINAL_BOLD "h3" TERMINAL_RESET ": %u\n", device->underload_packet_magic_header);
++		terminal_printf("  " TERMINAL_BOLD "h3" TERMINAL_RESET ": %s\n", device->underload_packet_magic_header);
+ 	if (device->transport_packet_magic_header)
+-		terminal_printf("  " TERMINAL_BOLD "h4" TERMINAL_RESET ": %u\n", device->transport_packet_magic_header);
++		terminal_printf("  " TERMINAL_BOLD "h4" TERMINAL_RESET ": %s\n", device->transport_packet_magic_header);
++	if (device->i1)
++		terminal_printf("  " TERMINAL_BOLD "i1" TERMINAL_RESET ": %s\n", device->i1);
++	if (device->i2)
++		terminal_printf("  " TERMINAL_BOLD "i2" TERMINAL_RESET ": %s\n", device->i2);
++	if (device->i3)
++		terminal_printf("  " TERMINAL_BOLD "i3" TERMINAL_RESET ": %s\n", device->i3);
++	if (device->i4)
++		terminal_printf("  " TERMINAL_BOLD "i4" TERMINAL_RESET ": %s\n", device->i4);
++	if (device->i5)
++		terminal_printf("  " TERMINAL_BOLD "i5" TERMINAL_RESET ": %s\n", device->i5);
+ 	if (device->first_peer) {
+ 		sort_peers(device);
+ 		terminal_printf("\n");
+@@ -283,10 +297,26 @@ static void dump_print(struct wgdevice *device, bool with_interface)
+ 	printf("%u\t", device->junk_packet_max_size);
+ 	printf("%u\t", device->init_packet_junk_size);
+ 	printf("%u\t", device->response_packet_junk_size);
+-	printf("%u\t", device->init_packet_magic_header);
+-	printf("%u\t", device->response_packet_magic_header);
+-	printf("%u\t", device->underload_packet_magic_header);
+-	printf("%u\t", device->transport_packet_magic_header);
++	printf("%u\t", device->cookie_reply_packet_junk_size);
++	printf("%u\t", device->transport_packet_junk_size);
++	fputs(device->init_packet_magic_header ? device->init_packet_magic_header : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->response_packet_magic_header ? device->response_packet_magic_header : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->underload_packet_magic_header ? device->underload_packet_magic_header : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->transport_packet_magic_header ? device->transport_packet_magic_header : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->i1 ? device->i1 : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->i2 ? device->i2 : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->i3 ? device->i3 : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->i4 ? device->i4 : "(null)", stdout);
++	fputc('\t', stdout);
++	fputs(device->i5 ? device->i5 : "(null)", stdout);
++	fputc('\t', stdout);
+ 	if (device->fwmark)
+ 		printf("0x%x\n", device->fwmark);
+ 	else
+@@ -358,22 +388,50 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+ 		printf("%u\n", device->response_packet_junk_size);
++	 } else if(!strcmp(param, "s3")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->cookie_reply_packet_junk_size);
++	 } else if(!strcmp(param, "s4")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->transport_packet_junk_size);
+ 	 } else if(!strcmp(param, "h1")) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+-		printf("%u\n", device->init_packet_magic_header);
++		printf("%s\n", device->init_packet_magic_header);
+ 	 } else if(!strcmp(param, "h2")) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+-		printf("%u\n", device->response_packet_magic_header);
++		printf("%s\n", device->response_packet_magic_header);
+ 	 } else if(!strcmp(param, "h3")) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+-		printf("%u\n", device->underload_packet_magic_header);
++		printf("%s\n", device->underload_packet_magic_header);
+ 	 } else if(!strcmp(param, "h4")) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+-		printf("%u\n", device->transport_packet_magic_header);
++		printf("%s\n", device->transport_packet_magic_header);
++	 } else if(!strcmp(param, "i1")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", device->i1);
++	 } else if(!strcmp(param, "i2")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", device->i2);
++	 } else if(!strcmp(param, "i3")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", device->i3);
++	 } else if(!strcmp(param, "i4")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", device->i4);
++	 } else if(!strcmp(param, "i5")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", device->i5);
+ 	 } else if (!strcmp(param, "endpoints")) {
+ 		for_each_wgpeer(device, peer) {
+ 			if (with_interface)
+diff --git a/src/showconf.c b/src/showconf.c
+index 424b2be..727ebcb 100644
+--- a/src/showconf.c
++++ b/src/showconf.c
+@@ -56,14 +56,28 @@ int showconf_main(int argc, const char *argv[])
+ 		printf("S1 = %u\n", device->init_packet_junk_size);
+ 	if (device->flags & WGDEVICE_HAS_S2)
+ 		printf("S2 = %u\n", device->response_packet_junk_size);
++	if (device->flags & WGDEVICE_HAS_S3)
++		printf("S3 = %u\n", device->cookie_reply_packet_junk_size);
++	if (device->flags & WGDEVICE_HAS_S4)
++		printf("S4 = %u\n", device->transport_packet_junk_size);
+ 	if (device->flags & WGDEVICE_HAS_H1)
+-		printf("H1 = %u\n", device->init_packet_magic_header);
++		printf("H1 = %s\n", device->init_packet_magic_header);
+ 	if (device->flags & WGDEVICE_HAS_H2)
+-		printf("H2 = %u\n", device->response_packet_magic_header);
++		printf("H2 = %s\n", device->response_packet_magic_header);
+ 	if (device->flags & WGDEVICE_HAS_H3)
+-		printf("H3 = %u\n", device->underload_packet_magic_header);
++		printf("H3 = %s\n", device->underload_packet_magic_header);
+ 	if (device->flags & WGDEVICE_HAS_H4)
+-		printf("H4 = %u\n", device->transport_packet_magic_header);
++		printf("H4 = %s\n", device->transport_packet_magic_header);
++	if (device->flags & WGDEVICE_HAS_I1)
++		printf("I1 = %s\n", device->i1);
++	if (device->flags & WGDEVICE_HAS_I2)
++		printf("I2 = %s\n", device->i2);
++	if (device->flags & WGDEVICE_HAS_I3)
++		printf("I3 = %s\n", device->i3);
++	if (device->flags & WGDEVICE_HAS_I4)
++		printf("I4 = %s\n", device->i4);
++	if (device->flags & WGDEVICE_HAS_I5)
++		printf("I5 = %s\n", device->i5);
+ 
+ 	printf("\n");
+ 	for_each_wgpeer(device, peer) {
+diff --git a/src/uapi/linux/linux/wireguard.h b/src/uapi/linux/linux/wireguard.h
+index b647ce3..04475cc 100644
+--- a/src/uapi/linux/linux/wireguard.h
++++ b/src/uapi/linux/linux/wireguard.h
+@@ -196,6 +196,13 @@ enum wgdevice_attribute {
+ 	WGDEVICE_A_H3,
+ 	WGDEVICE_A_H4,
+ 	WGDEVICE_A_PEER,
++	WGDEVICE_A_S3,
++	WGDEVICE_A_S4,
++	WGDEVICE_A_I1,
++	WGDEVICE_A_I2,
++	WGDEVICE_A_I3,
++	WGDEVICE_A_I4,
++	WGDEVICE_A_I5,
+ 	__WGDEVICE_A_LAST
+ };
+ #define WGDEVICE_A_MAX (__WGDEVICE_A_LAST - 1)

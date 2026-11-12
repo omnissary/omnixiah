@@ -5,35 +5,23 @@ _self: super: {
     patchFlags = [ "-p2" ];
     patches = [
       # base amnezia support
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/ec8f4ff044aed600b3eede9828abff78d588bbea.patch";
-        hash = "sha256-PsGsLb71hlLXURL/s1I1clxacCKwaJfl/x5fQWbyZu4=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/ec8f4ff044aed600b3eede9828abff78d588bbea.patch
+      ./base-amnezia-support.patch
       # S3,S4,I1-I5 support
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/13067d23d8b7cd4841d1a603c4456397fd3dec88.patch";
-        hash = "sha256-B/a4awTSx95opo+c2ft7BpnunmsbLnNPfcFZ4FuLcko=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/13067d23d8b7cd4841d1a603c4456397fd3dec88.patch
+      ./s3-s4-i1-i5-support.patch
       # awg3 uapi resync with the kernel tree
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/8d27021ae9d34d66346eef09542f842ec5630ecf.patch";
-        hash = "sha256-GMHxeymssU+OKcY2uJkPNUVz/5X75r2JKE8RzP/WuKI=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/8d27021ae9d34d66346eef09542f842ec5630ecf.patch
+      ./awg3-uapi-resync.patch
       # awg3 H1-H4 packed u64 and keepalive u32
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/6ed3ad73047b7c9c21dc214aeed209ff04fd9b3c.patch";
-        hash = "sha256-cvFhqloihgQb8VwqJLmj05g9FTPsuFVveabfyO2Ne9g=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/6ed3ad73047b7c9c21dc214aeed209ff04fd9b3c.patch
+      ./awg3-h1-h4-packed-u64-and-keepalive-u32.patch
       # awg3 device settings
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/91965661b8347e2f64080a5f3d33caff8e072eac.patch";
-        hash = "sha256-La1b4DsLS+xT1hP1DoDn5ZOqjh/sA+EGHrdw+IOdAhc=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/91965661b8347e2f64080a5f3d33caff8e072eac.patch
+      ./awg3-device-settings.patch
       # awg3 creating namespace reporting
-      (super.fetchurl {
-        url = "https://git.tatikoma.dev/corpix/wireguard-tools/commit/8000a97dcca925f6b4dc13e3d2783039ed7b3894.patch";
-        hash = "sha256-DJoCfMmM3UzFb0i/l681e4Q4XhU1FeoHNajju+gaLE0=";
-      })
+      # https://git.tatikoma.dev/corpix/wireguard-tools/commit/8000a97dcca925f6b4dc13e3d2783039ed7b3894.patch
+      ./awg3-creating-namespace-reporting.patch
     ];
   });
 }

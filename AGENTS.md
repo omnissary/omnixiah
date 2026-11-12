@@ -6,7 +6,7 @@ Omnixiah is a NixOS spin built around reusable NixOS profiles.
 
 - `flake.nix`: inputs, the overlaid `pkgs` package set, apps, checks, formatter, `profiles`, and `modules`.
 - `modules/`: shared modules. `modules/default.nix` registers every file next to it, so adding `modules/tc.nix` is enough.
-- `overlays/packages/<name>/`: package overlays, one directory per package, registered the same way.
+- `overlays/packages/<name>/`: package overlays, one directory per package, registered the same way. Patches are vendored next to the overlay that applies them and referenced by path, never fetched at build time, so builds do not depend on git.tatikoma.dev or any other patch host. A patch file is named after what it does, and its source URL stays as a comment directly above the reference; this is the one comment the no-comments rule allows.
 - `profiles/`: profile modules, registered by name in `profiles/default.nix`.
   - `base`: distribution defaults, see the layers below.
   - `debug`, `qemu`: system profiles.

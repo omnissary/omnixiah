@@ -1,0 +1,520 @@
+From f9b6a697e2032e289d2c29847c45fb9003c75ec7 Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Tue, 2 Jun 2026 20:05:06 +0000
+Subject: [PATCH] wireguard: harden CPS descriptor configuration
+
+Stage I1-I5 CPS descriptor updates before applying them, so failed
+advanced-security validation cannot leave partially updated descriptor
+state on the device. Parse staged descriptors into temporary packet
+templates and commit them only after the full configuration validates.
+
+Tighten CPS descriptor parsing by rejecting non-positive random field
+lengths, checking packet size accumulation against MESSAGE_MAX_SIZE,
+and cleaning up partially built packet state on errors.
+
+Move CPS descriptor teardown until after handshake workqueues are
+destroyed, avoiding races with queued handshake initiation work that may
+still read descriptor state.
+---
+ drivers/net/wireguard/device.c  | 72 +++++++++++++++++++------------
+ drivers/net/wireguard/device.h  |  5 ++-
+ drivers/net/wireguard/junk.c    | 75 +++++++++++++++++++++------------
+ drivers/net/wireguard/junk.h    |  4 ++
+ drivers/net/wireguard/netlink.c | 68 +++++++++---------------------
+ 5 files changed, 120 insertions(+), 104 deletions(-)
+
+diff --git a/drivers/net/wireguard/device.c b/drivers/net/wireguard/device.c
+index b678d5a6a6bb..54863d473777 100644
+--- a/drivers/net/wireguard/device.c
++++ b/drivers/net/wireguard/device.c
+@@ -118,7 +118,7 @@ static bool magic_header_is_default(const struct magic_header *mh, u32 value)
+ }
+ 
+ static bool magic_headers_overlap(const struct magic_header *left,
+-					 const struct magic_header *right)
++				  const struct magic_header *right)
+ {
+ 	return !(right->end < left->start || left->end < right->start);
+ }
+@@ -255,9 +255,6 @@ static void wg_destruct(struct net_device *dev)
+ 	struct wg_device *wg = netdev_priv(dev);
+ 	int i;
+ 
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
+-		jp_spec_free(&wg->ispecs[i]);
+-
+ 	rtnl_lock();
+ 	list_del(&wg->device_list);
+ 	rtnl_unlock();
+@@ -270,6 +267,8 @@ static void wg_destruct(struct net_device *dev)
+ 	destroy_workqueue(wg->handshake_receive_wq);
+ 	destroy_workqueue(wg->handshake_send_wq);
+ 	destroy_workqueue(wg->packet_crypt_wq);
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
++		jp_spec_free(&wg->ispecs[i]);
+ 	wg_packet_queue_free(&wg->handshake_queue, true);
+ 	wg_packet_queue_free(&wg->decrypt_queue, false);
+ 	wg_packet_queue_free(&wg->encrypt_queue, false);
+@@ -356,7 +355,8 @@ static int wg_newlink(struct net_device *dev,
+ 		goto err_free_index_hashtable;
+ 
+ 	wg->handshake_send_wq = alloc_workqueue("wg-kex-%s",
+-			WQ_UNBOUND | WQ_FREEZABLE, 0, dev->name);
++						WQ_UNBOUND | WQ_FREEZABLE, 0,
++						dev->name);
+ 	if (!wg->handshake_send_wq)
+ 		goto err_destroy_handshake_receive;
+ 
+@@ -500,10 +500,12 @@ void wg_device_uninit(void)
+ 	rcu_barrier();
+ }
+ 
+-int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc)
++int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc,
++				 char **ispec_descs, u32 ispec_mask)
+ {
+ 	struct wg_device *wg = netdev_priv(dev);
+ 	struct amnezia_config config = *asc;
++	struct jp_spec parsed_ispecs[ARRAY_SIZE(wg->ispecs)] = {};
+ 	struct magic_header *headers[] = {
+ 		&config.init_packet_magic_header,
+ 		&config.response_packet_magic_header,
+@@ -538,14 +540,14 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 
+ 	if (config.junk_packet_max_size >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: JunkPacketMaxSize: %d; should be smaller than maxSegmentSize: %d\n",
+-								dev->name, config.junk_packet_max_size,
+-								MESSAGE_MAX_SIZE);
++				    dev->name, config.junk_packet_max_size,
++				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	} else if (config.junk_packet_max_size < config.junk_packet_min_size) {
+ 		net_dbg_ratelimited("%s: maxSize: %d; should be greater than minSize: %d\n",
+-								dev->name, config.junk_packet_max_size,
+-								config.junk_packet_min_size);
++				    dev->name, config.junk_packet_max_size,
++				    config.junk_packet_min_size);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -555,8 +557,8 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 
+ 	if (config.init_packet_junk_size + MESSAGE_INITIATION_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: init header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+-		                    dev->name, MESSAGE_INITIATION_SIZE,
+-								config.init_packet_junk_size, MESSAGE_MAX_SIZE);
++				    dev->name, MESSAGE_INITIATION_SIZE,
++				    config.init_packet_junk_size, MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -566,8 +568,9 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 
+ 	if (config.response_packet_junk_size + MESSAGE_RESPONSE_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: response header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+-		                    dev->name, MESSAGE_RESPONSE_SIZE,
+-		                    config.response_packet_junk_size, MESSAGE_MAX_SIZE);
++				    dev->name, MESSAGE_RESPONSE_SIZE,
++				    config.response_packet_junk_size,
++				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -577,8 +580,9 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 
+ 	if (config.cookie_packet_junk_size + MESSAGE_COOKIE_REPLY_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: cookie header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+-								dev->name, MESSAGE_COOKIE_REPLY_SIZE,
+-								config.cookie_packet_junk_size, MESSAGE_MAX_SIZE);
++				    dev->name, MESSAGE_COOKIE_REPLY_SIZE,
++				    config.cookie_packet_junk_size,
++				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -588,8 +592,9 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 
+ 	if (config.transport_packet_junk_size + MESSAGE_TRANSPORT_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: transport header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+-								dev->name, MESSAGE_TRANSPORT_SIZE,
+-								config.transport_packet_junk_size, MESSAGE_MAX_SIZE);
++				    dev->name, MESSAGE_TRANSPORT_SIZE,
++				    config.transport_packet_junk_size,
++				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -612,28 +617,41 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 	}
+ 
+ 	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
+-		ret = jp_spec_setup(&wg->ispecs[i]);
+-		if (ret) {
+-			net_dbg_ratelimited("%s: I%d-packet invalid format\n",
+-					    dev->name, i + 1);
++		if (ispec_mask & (1U << i)) {
++			ret = jp_spec_parse(&parsed_ispecs[i], ispec_descs[i]);
++			if (ret) {
++				net_dbg_ratelimited("%s: I%d-packet invalid format\n",
++						    dev->name, i + 1);
+ 				goto out;
+-		}
+-		if (wg->ispecs[i].pkt_size > 0)
++			}
++			if (parsed_ispecs[i].pkt_size > 0)
++				a_sec_on = true;
++		} else if (wg->ispecs[i].pkt_size > 0) {
+ 			a_sec_on = true;
++		}
+ 	}
+ 
+ 	if (MESSAGE_INITIATION_SIZE + config.init_packet_junk_size ==
+ 	    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size) {
+ 		net_dbg_ratelimited("%s: new init size:%d; and new response size:%d; should differ\n",
+-		                    dev->name,
+-		                    MESSAGE_INITIATION_SIZE + config.init_packet_junk_size,
+-		                    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size);
++				    dev->name,
++				    MESSAGE_INITIATION_SIZE + config.init_packet_junk_size,
++				    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+ 	config.advanced_security = a_sec_on;
+ 	wg->advanced_security_config = config;
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
++		if (!(ispec_mask & (1U << i)))
++			continue;
++		jp_spec_commit(&wg->ispecs[i], ispec_descs[i],
++			       &parsed_ispecs[i]);
++		ispec_descs[i] = NULL;
++	}
+ out:
++	for (i = 0; i < ARRAY_SIZE(parsed_ispecs); ++i)
++		jp_spec_free_packet(&parsed_ispecs[i]);
+ 	return ret;
+ }
+diff --git a/drivers/net/wireguard/device.h b/drivers/net/wireguard/device.h
+index 4c3e0ecf83a9..acd732e44cf0 100644
+--- a/drivers/net/wireguard/device.h
++++ b/drivers/net/wireguard/device.h
+@@ -60,7 +60,7 @@ struct wg_device {
+ 	struct sock __rcu *sock4, *sock6;
+ 	struct net __rcu *creating_net;
+ 	struct noise_static_identity static_identity;
+-	struct workqueue_struct *packet_crypt_wq,*handshake_receive_wq, *handshake_send_wq;
++	struct workqueue_struct *packet_crypt_wq, *handshake_receive_wq, *handshake_send_wq;
+ 	struct cookie_checker cookie_checker;
+ 	struct pubkey_hashtable *peer_hashtable;
+ 	struct index_hashtable *index_hashtable;
+@@ -77,6 +77,7 @@ struct wg_device {
+ 
+ int wg_device_init(void);
+ void wg_device_uninit(void);
+-int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc);
++int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc,
++				 char **ispec_descs, u32 ispec_mask);
+ 
+ #endif /* _WG_DEVICE_H */
+diff --git a/drivers/net/wireguard/junk.c b/drivers/net/wireguard/junk.c
+index 28a03f56b738..427ba417021e 100644
+--- a/drivers/net/wireguard/junk.c
++++ b/drivers/net/wireguard/junk.c
+@@ -122,7 +122,7 @@ static int parse_r_tag(char *val, struct list_head *head)
+ 	struct jp_tag *tag;
+ 	int len;
+ 
+-	if (!val || kstrtoint(val, 10, &len) < 0)
++	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+ 		return -EINVAL;
+ 
+ 	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
+@@ -154,7 +154,7 @@ static int parse_rc_tag(char *val, struct list_head *head)
+ 	struct jp_tag *tag;
+ 	int len;
+ 
+-	if (!val || kstrtoint(val, 10, &len) < 0)
++	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+ 		return -EINVAL;
+ 
+ 	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
+@@ -182,7 +182,7 @@ static int parse_rd_tag(char *val, struct list_head *head)
+ 	struct jp_tag *tag;
+ 	int len;
+ 
+-	if (!val || kstrtoint(val, 10, &len) < 0)
++	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+ 		return -EINVAL;
+ 
+ 	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
+@@ -236,10 +236,8 @@ void jp_tag_free(struct jp_tag *tag)
+ 	kfree(tag->pkt);
+ }
+ 
+-void jp_spec_free(struct jp_spec *spec)
++void jp_spec_free_packet(struct jp_spec *spec)
+ {
+-	kfree(spec->desc);
+-	spec->desc = NULL;
+ 	kfree(spec->pkt);
+ 	spec->pkt = NULL;
+ 	kfree(spec->mods);
+@@ -248,31 +246,29 @@ void jp_spec_free(struct jp_spec *spec)
+ 	spec->mods_size = 0;
+ }
+ 
+-int jp_spec_setup(struct jp_spec *spec)
++void jp_spec_free(struct jp_spec *spec)
++{
++	kfree(spec->desc);
++	spec->desc = NULL;
++	jp_spec_free_packet(spec);
++}
++
++int jp_spec_parse(struct jp_spec *spec, const char *desc)
+ {
+ 	struct jp_modifier *mod;
+ 	struct jp_tag *tag, *tmp;
+-	char *buf;
++	char *buf = NULL;
+ 	int err = 0;
+ 	int mods_size;
+ 	int pkt_size;
+ 	LIST_HEAD(head);
+ 
+-	mutex_lock(&spec->lock);
++	jp_spec_free_packet(spec);
+ 
+-	kfree(spec->pkt);
+-	kfree(spec->mods);
+-	spec->pkt = NULL;
+-	spec->mods = NULL;
+-	spec->pkt_size = 0;
+-	spec->mods_size = 0;
+-
+-	if (!spec->desc) {
+-		mutex_unlock(&spec->lock);
++	if (!desc)
+ 		return 0;
+-	}
+ 
+-	buf = kstrdup(spec->desc, GFP_KERNEL);
++	buf = kstrdup(desc, GFP_KERNEL);
+ 	if (!buf) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -285,18 +281,17 @@ int jp_spec_setup(struct jp_spec *spec)
+ 	pkt_size = 0;
+ 	mods_size = 0;
+ 	list_for_each_entry(tag, &head, head) {
++		if (tag->pkt_size > MESSAGE_MAX_SIZE - pkt_size) {
++			err = -EINVAL;
++			goto out;
++		}
+ 		pkt_size += tag->pkt_size;
+ 		if (tag->func)
+ 			++mods_size;
+ 	}
+ 
+-	if (pkt_size > MESSAGE_MAX_SIZE) {
+-		err = -EINVAL;
+-		goto out;
+-	}
+-
+ 	spec->pkt = kzalloc(pkt_size, GFP_KERNEL);
+-	spec->mods = kzalloc(mods_size * sizeof(*spec->mods), GFP_KERNEL);
++	spec->mods = kcalloc(mods_size, sizeof(*spec->mods), GFP_KERNEL);
+ 	if (!spec->pkt || !spec->mods) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -318,16 +313,44 @@ int jp_spec_setup(struct jp_spec *spec)
+ 	}
+ 
+ out:
++	if (err)
++		jp_spec_free_packet(spec);
+ 	list_for_each_entry_safe(tag, tmp, &head, head) {
+ 		jp_tag_free(tag);
+ 		list_del(&tag->head);
+ 		kfree(tag);
+ 	}
+ 	kfree(buf);
++	return err;
++}
++
++int jp_spec_setup(struct jp_spec *spec)
++{
++	int err;
++
++	mutex_lock(&spec->lock);
++	err = jp_spec_parse(spec, spec->desc);
+ 	mutex_unlock(&spec->lock);
+ 	return err;
+ }
+ 
++void jp_spec_commit(struct jp_spec *spec, char *desc, struct jp_spec *parsed)
++{
++	mutex_lock(&spec->lock);
++	kfree(spec->desc);
++	jp_spec_free_packet(spec);
++	spec->desc = desc;
++	spec->pkt = parsed->pkt;
++	spec->mods = parsed->mods;
++	spec->pkt_size = parsed->pkt_size;
++	spec->mods_size = parsed->mods_size;
++	parsed->pkt = NULL;
++	parsed->mods = NULL;
++	parsed->pkt_size = 0;
++	parsed->mods_size = 0;
++	mutex_unlock(&spec->lock);
++}
++
+ void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer)
+ {
+ 	struct jp_modifier *mod;
+diff --git a/drivers/net/wireguard/junk.h b/drivers/net/wireguard/junk.h
+index b769cfea8791..9d6f614d8e2a 100644
+--- a/drivers/net/wireguard/junk.h
++++ b/drivers/net/wireguard/junk.h
+@@ -26,6 +26,7 @@ struct jp_spec {
+ 	char *desc;
+ 	u8 *pkt;
+ 	struct jp_modifier *mods;
++	/* Protects packet bytes while dynamic fields are refreshed for send. */
+ 	struct mutex lock;
+ 	int pkt_size;
+ 	int mods_size;
+@@ -34,7 +35,10 @@ struct jp_spec {
+ void jp_tag_free(struct jp_tag *tag);
+ int jp_parse_tags(char *str, struct list_head *head);
+ void jp_spec_free(struct jp_spec *spec);
++void jp_spec_free_packet(struct jp_spec *spec);
++int jp_spec_parse(struct jp_spec *spec, const char *desc);
+ int jp_spec_setup(struct jp_spec *spec);
++void jp_spec_commit(struct jp_spec *spec, char *desc, struct jp_spec *parsed);
+ void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer);
+ 
+ #endif /* _WG_JUNK_H */
+diff --git a/drivers/net/wireguard/netlink.c b/drivers/net/wireguard/netlink.c
+index c35eaf90ced4..50e9d33a0555 100644
+--- a/drivers/net/wireguard/netlink.c
++++ b/drivers/net/wireguard/netlink.c
+@@ -39,7 +39,7 @@ static const struct nla_policy device_policy[WGDEVICE_A_MAX + 1] = {
+ 	[WGDEVICE_A_H2]			= { .type = NLA_NUL_STRING },
+ 	[WGDEVICE_A_H3]			= { .type = NLA_NUL_STRING },
+ 	[WGDEVICE_A_H4]			= { .type = NLA_NUL_STRING },
+-        [WGDEVICE_A_PEER]               = { .type = NLA_NESTED },
++	[WGDEVICE_A_PEER]		= { .type = NLA_NESTED },
+ 	[WGDEVICE_A_S3]			= { .type = NLA_U16 },
+ 	[WGDEVICE_A_S4]			= { .type = NLA_U16 },
+ 	[WGDEVICE_A_I1]			= { .type = NLA_NUL_STRING },
+@@ -47,7 +47,7 @@ static const struct nla_policy device_policy[WGDEVICE_A_MAX + 1] = {
+ 	[WGDEVICE_A_I3]			= { .type = NLA_NUL_STRING },
+ 	[WGDEVICE_A_I4]			= { .type = NLA_NUL_STRING },
+ 	[WGDEVICE_A_I5]			= { .type = NLA_NUL_STRING },
+-        [WGDEVICE_A_CREATING_NET]       = { .type = NLA_S32 }
++	[WGDEVICE_A_CREATING_NET]	= { .type = NLA_S32 }
+ };
+ 
+ static const struct nla_policy peer_policy[WGPEER_A_MAX + 1] = {
+@@ -577,11 +577,16 @@ out:
+ 
+ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ {
++	const int ispec_attrs[] = {
++		WGDEVICE_A_I1, WGDEVICE_A_I2, WGDEVICE_A_I3, WGDEVICE_A_I4,
++		WGDEVICE_A_I5,
++	};
+ 	struct wg_device *wg = lookup_interface(info->attrs, skb);
+ 	struct amnezia_config *asc = kzalloc(sizeof(*asc), GFP_KERNEL);
++	char *ispec_descs[ARRAY_SIZE(ispec_attrs)] = {};
++	u32 flags = 0, ispec_mask = 0;
+ 	char *str;
+-	u32 flags = 0;
+-	int ret;
++	int ret, i;
+ 
+ 	if (IS_ERR(wg)) {
+ 		ret = PTR_ERR(wg);
+@@ -713,54 +718,16 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 			goto out;
+ 	}
+ 
+-	if (info->attrs[WGDEVICE_A_I1]) {
++	for (i = 0; i < ARRAY_SIZE(ispec_attrs); ++i) {
++		if (!info->attrs[ispec_attrs[i]])
++			continue;
+ 		asc->advanced_security = true;
+-		kfree(wg->ispecs[0].desc);
+-		wg->ispecs[0].desc = nla_strdup(info->attrs[WGDEVICE_A_I1], GFP_KERNEL);
+-		if (!wg->ispecs[0].desc) {
+-			ret = -ENOMEM;
+-			goto out;
+-		}
+-	}
+-
+-	if (info->attrs[WGDEVICE_A_I2]) {
+-		asc->advanced_security = true;
+-		kfree(wg->ispecs[1].desc);
+-		wg->ispecs[1].desc = nla_strdup(info->attrs[WGDEVICE_A_I2], GFP_KERNEL);
+-		if (!wg->ispecs[1].desc) {
+-			ret = -ENOMEM;
+-			goto out;
+-		}
+-	}
+-
+-	if (info->attrs[WGDEVICE_A_I3]) {
+-		asc->advanced_security = true;
+-		kfree(wg->ispecs[2].desc);
+-		wg->ispecs[2].desc = nla_strdup(info->attrs[WGDEVICE_A_I3], GFP_KERNEL);
+-		if (!wg->ispecs[2].desc) {
+-			ret = -ENOMEM;
+-			goto out;
+-		}
+-	}
+-
+-	if (info->attrs[WGDEVICE_A_I4]) {
+-		asc->advanced_security = true;
+-		kfree(wg->ispecs[3].desc);
+-		wg->ispecs[3].desc = nla_strdup(info->attrs[WGDEVICE_A_I4], GFP_KERNEL);
+-		if (!wg->ispecs[3].desc) {
+-			ret = -ENOMEM;
+-			goto out;
+-		}
+-	}
+-
+-	if (info->attrs[WGDEVICE_A_I5]) {
+-		asc->advanced_security = true;
+-		kfree(wg->ispecs[4].desc);
+-		wg->ispecs[4].desc = nla_strdup(info->attrs[WGDEVICE_A_I5], GFP_KERNEL);
+-		if (!wg->ispecs[4].desc) {
++		ispec_descs[i] = nla_strdup(info->attrs[ispec_attrs[i]], GFP_KERNEL);
++		if (!ispec_descs[i]) {
+ 			ret = -ENOMEM;
+ 			goto out;
+ 		}
++		ispec_mask |= 1U << i;
+ 	}
+ 
+ 	if (flags & WGDEVICE_F_REPLACE_PEERS)
+@@ -806,7 +773,8 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 	}
+ skip_set_private_key:
+ 
+-	ret = wg_device_handle_post_config(wg->dev, asc);
++	ret = wg_device_handle_post_config(wg->dev, asc, ispec_descs,
++					   ispec_mask);
+ 	if (ret < 0)
+ 		goto out;
+ 
+@@ -831,6 +799,8 @@ out:
+ 	rtnl_unlock();
+ 	dev_put(wg->dev);
+ out_nodev:
++	for (i = 0; i < ARRAY_SIZE(ispec_descs); ++i)
++		kfree(ispec_descs[i]);
+ 	kfree(asc);
+ 	if (info->attrs[WGDEVICE_A_PRIVATE_KEY])
+ 		memzero_explicit(nla_data(info->attrs[WGDEVICE_A_PRIVATE_KEY]),

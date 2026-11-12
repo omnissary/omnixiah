@@ -1,0 +1,95 @@
+From e561020e2229763be2f17475929a79e49a0f129d Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Mon, 14 Apr 2025 19:10:23 +0000
+Subject: [PATCH] return first exited process exit code
+
+---
+ hivemind.go | 13 ++++++++-----
+ main.go     |  5 ++++-
+ process.go  |  3 ++-
+ 3 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/hivemind.go b/hivemind.go
+index e2217c0..e68c553 100644
+--- a/hivemind.go
++++ b/hivemind.go
+@@ -58,14 +58,14 @@ func newHivemind(conf hivemindConfig) (h *hivemind) {
+ 	return
+ }
+ 
+-func (h *hivemind) runProcess(proc *process) {
++func (h *hivemind) runProcess(proc *process, exitCode chan int) {
+ 	h.procWg.Add(1)
+ 
+ 	go func() {
+ 		defer h.procWg.Done()
+ 		defer func() { h.done <- true }()
+ 
+-		proc.Run()
++		exitCode <- proc.Run()
+ 	}()
+ }
+ 
+@@ -97,7 +97,7 @@ func (h *hivemind) waitForExit() {
+ 	}
+ }
+ 
+-func (h *hivemind) Run() {
++func (h *hivemind) Run() int {
+ 	fmt.Printf("\033]0;%s | hivemind\007", h.title)
+ 
+ 	h.done = make(chan bool, len(h.procs))
+@@ -105,11 +105,14 @@ func (h *hivemind) Run() {
+ 	h.interrupted = make(chan os.Signal)
+ 	signal.Notify(h.interrupted, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+ 
++	exitCodes := make(chan int, len(h.procs))
+ 	for _, proc := range h.procs {
+-		h.runProcess(proc)
++		h.runProcess(proc, exitCodes)
+ 	}
+ 
+ 	go h.waitForExit()
+-
+ 	h.procWg.Wait()
++
++	// note: return first exited process exit code
++	return <-exitCodes
+ }
+diff --git a/main.go b/main.go
+index 7c2bf58..669c4ff 100644
+--- a/main.go
++++ b/main.go
+@@ -65,7 +65,10 @@ func main() {
+ 		conf.Root, err = filepath.Abs(conf.Root)
+ 		fatalOnErr(err)
+ 
+-		newHivemind(conf).Run()
++		exitCode := newHivemind(conf).Run()
++		if exitCode > 0 {
++			os.Exit(exitCode)
++		}
+ 
+ 		return nil
+ 	}
+diff --git a/process.go b/process.go
+index 45a9571..e44d709 100644
+--- a/process.go
++++ b/process.go
+@@ -56,7 +56,7 @@ func (p *process) Running() bool {
+ 	return p.Process != nil && p.ProcessState == nil
+ }
+ 
+-func (p *process) Run() {
++func (p *process) Run() int {
+ 	p.output.PipeOutput(p)
+ 	defer p.output.ClosePipe(p)
+ 
+@@ -69,6 +69,7 @@ func (p *process) Run() {
+ 	} else {
+ 		p.writeLine([]byte("\033[1mProcess exited\033[0m"))
+ 	}
++	return p.Cmd.ProcessState.ExitCode()
+ }
+ 
+ func (p *process) Interrupt() {

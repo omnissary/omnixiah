@@ -1,0 +1,3209 @@
+diff --git a/drivers/net/wireguard/cookie.c b/drivers/net/wireguard/cookie.c
+index 9365c4c35bab..c73dd4ef8b2a 100644
+--- a/drivers/net/wireguard/cookie.c
++++ b/drivers/net/wireguard/cookie.c
+@@ -10,6 +10,8 @@
+ #include "ratelimiter.h"
+ #include "timers.h"
+ 
++#include <linux/unaligned.h>
++
+ #include <crypto/blake2s.h>
+ #include <crypto/chacha20poly1305.h>
+ #include <crypto/utils.h>
+@@ -205,7 +207,8 @@ void wg_cookie_message_consume(struct message_handshake_cookie *src,
+ 	if (unlikely(!wg_index_hashtable_lookup(wg->index_hashtable,
+ 						INDEX_HASHTABLE_HANDSHAKE |
+ 						INDEX_HASHTABLE_KEYPAIR,
+-						src->receiver_index, &peer)))
++						get_unaligned(&src->receiver_index),
++						&peer)))
+ 		return;
+ 
+ 	down_read(&peer->latest_cookie.lock);
+diff --git a/drivers/net/wireguard/device.c b/drivers/net/wireguard/device.c
+index ad611bdb3baf..5b06c04ca43e 100644
+--- a/drivers/net/wireguard/device.c
++++ b/drivers/net/wireguard/device.c
+@@ -53,7 +53,7 @@ static int wg_open(struct net_device *dev)
+ 		goto out;
+ 	list_for_each_entry(peer, &wg->peer_list, peer_list) {
+ 		wg_packet_send_staged_packets(peer);
+-		if (!u16_range_is_zero(peer->persistent_keepalive_interval))
++		if (!wg_u16_range_is_zero(peer->persistent_keepalive_interval))
+ 			wg_packet_send_keepalive(peer);
+ 	}
+ out:
+@@ -257,14 +257,15 @@ static void wg_destruct(struct net_device *dev)
+ 	destroy_workqueue(wg->handshake_receive_wq);
+ 	destroy_workqueue(wg->handshake_send_wq);
+ 	destroy_workqueue(wg->packet_crypt_wq);
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
+-		jp_spec_free(&wg->ispecs[i]);
++	for (i = 0; i < ARRAY_SIZE(wg->junk_specs); ++i)
++		wg_junk_spec_free(&wg->junk_specs[i]);
+ 	wg_packet_queue_free(&wg->handshake_queue, true);
+ 	wg_packet_queue_free(&wg->decrypt_queue, false);
+ 	wg_packet_queue_free(&wg->encrypt_queue, false);
+ 	rcu_barrier(); /* Wait for all the peers to be actually freed. */
+ 	wg_ratelimiter_uninit();
+ 	memzero_explicit(&wg->static_identity, sizeof(wg->static_identity));
++	kfree_sensitive(rcu_dereference_protected(wg->obfuscation, true));
+ 	kvfree(wg->index_hashtable);
+ 	kvfree(wg->peer_hashtable);
+ 	mutex_unlock(&wg->device_update_lock);
+@@ -317,23 +318,39 @@ static int wg_newlink(struct net_device *dev,
+ {
+ 	struct net *link_net = rtnl_newlink_link_net(params);
+ 	struct wg_device *wg = netdev_priv(dev);
++	struct wg_obfuscation *obfuscation;
+ 	int ret = -ENOMEM, i;
+ 
+ 	rcu_assign_pointer(wg->creating_net, link_net);
+ 	init_rwsem(&wg->static_identity.lock);
+-	init_rwsem(&wg->header_protection.lock);
+ 	mutex_init(&wg->socket_update_lock);
+ 	mutex_init(&wg->device_update_lock);
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
+-		mutex_init(&wg->ispecs[i].lock);
++	for (i = 0; i < ARRAY_SIZE(wg->junk_specs); ++i)
++		mutex_init(&wg->junk_specs[i].lock);
+ 	wg_allowedips_init(&wg->peer_allowedips);
+ 	wg_cookie_checker_init(&wg->cookie_checker, wg);
+ 	INIT_LIST_HEAD(&wg->peer_list);
+ 	wg->device_update_gen = 1;
+ 
++	obfuscation = kzalloc(sizeof(*obfuscation), GFP_KERNEL);
++	if (!obfuscation)
++		return ret;
++	wg_u32_range_init(&obfuscation->init_packet_magic_header,
++			  MESSAGE_HANDSHAKE_INITIATION,
++			  MESSAGE_HANDSHAKE_INITIATION);
++	wg_u32_range_init(&obfuscation->response_packet_magic_header,
++			  MESSAGE_HANDSHAKE_RESPONSE,
++			  MESSAGE_HANDSHAKE_RESPONSE);
++	wg_u32_range_init(&obfuscation->cookie_packet_magic_header,
++			  MESSAGE_HANDSHAKE_COOKIE,
++			  MESSAGE_HANDSHAKE_COOKIE);
++	wg_u32_range_init(&obfuscation->transport_packet_magic_header,
++			  MESSAGE_DATA, MESSAGE_DATA);
++	rcu_assign_pointer(wg->obfuscation, obfuscation);
++
+ 	wg->peer_hashtable = wg_pubkey_hashtable_alloc();
+ 	if (!wg->peer_hashtable)
+-		return ret;
++		goto err_free_obfuscation;
+ 
+ 	wg->index_hashtable = wg_index_hashtable_alloc();
+ 	if (!wg->index_hashtable)
+@@ -388,15 +405,6 @@ static int wg_newlink(struct net_device *dev,
+ 	 */
+ 	dev->priv_destructor = wg_destruct;
+ 
+-	u32_range_init(&wg->advanced_security_config.init_packet_magic_header,
+-		       MESSAGE_HANDSHAKE_INITIATION, MESSAGE_HANDSHAKE_INITIATION);
+-	u32_range_init(&wg->advanced_security_config.response_packet_magic_header,
+-		       MESSAGE_HANDSHAKE_RESPONSE, MESSAGE_HANDSHAKE_RESPONSE);
+-	u32_range_init(&wg->advanced_security_config.cookie_packet_magic_header,
+-		       MESSAGE_HANDSHAKE_COOKIE, MESSAGE_HANDSHAKE_COOKIE);
+-	u32_range_init(&wg->advanced_security_config.transport_packet_magic_header,
+-		       MESSAGE_DATA, MESSAGE_DATA);
+-
+ 	pr_debug("%s: Interface created\n", dev->name);
+ 	return ret;
+ 
+@@ -418,6 +426,8 @@ err_free_index_hashtable:
+ 	kvfree(wg->index_hashtable);
+ err_free_peer_hashtable:
+ 	kvfree(wg->peer_hashtable);
++err_free_obfuscation:
++	kfree(rcu_dereference_protected(wg->obfuscation, true));
+ 	return ret;
+ }
+ 
+@@ -491,104 +501,146 @@ void wg_device_uninit(void)
+ 	rcu_barrier();
+ }
+ 
+-int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc,
+-				 char **ispec_descs, u32 ispec_mask)
++/* ranges[] order: the durations lead, so DURATION_RANGES bounds the ones a
++ * zero lower bound would break.
++ */
++#define DURATION_RANGES 4
++static const char * const range_names[] = {
++	"RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
++	"ContentPaddingAddition", "MaxHandshakeAttempts"
++};
++
++int wg_device_handle_post_config(struct net_device *dev,
++				 const struct wg_obfuscation *staged,
++				 char **junk_descs, u32 junk_mask)
+ {
+ 	struct wg_device *wg = netdev_priv(dev);
+-	struct amnezia_config config = *asc;
+-	struct jp_spec parsed_ispecs[ARRAY_SIZE(wg->ispecs)] = {};
+-	u32_range_t headers[] = {
+-		config.init_packet_magic_header,
+-		config.response_packet_magic_header,
+-		config.cookie_packet_magic_header,
+-		config.transport_packet_magic_header,
+-	};
++	struct wg_junk_spec parsed_specs[ARRAY_SIZE(wg->junk_specs)] = {};
++	struct wg_obfuscation *config, *old;
++	struct wg_u32_range headers[4];
++	struct wg_u16_range ranges[6];
+ 	int ret = 0;
+ 	int i, j;
+ 
+-	if (config.junk_packet_count < 0) {
+-		net_dbg_ratelimited("%s: JunkPacketCount should be non negative\n", dev->name);
+-		ret = -EINVAL;
+-		goto out;
+-	}
++	config = kmemdup(staged, sizeof(*config), GFP_KERNEL);
++	if (!config)
++		return -ENOMEM;
+ 
+-	if (config.junk_packet_count > 0 &&
+-	    config.junk_packet_min_size == config.junk_packet_max_size)
+-		config.junk_packet_max_size++;
++	headers[0] = config->init_packet_magic_header;
++	headers[1] = config->response_packet_magic_header;
++	headers[2] = config->cookie_packet_magic_header;
++	headers[3] = config->transport_packet_magic_header;
++
++	ranges[0] = config->rekey_after_time;
++	ranges[1] = config->rekey_timeout;
++	ranges[2] = config->reject_after_time;
++	ranges[3] = config->keepalive_timeout;
++	ranges[4] = config->content_padding_addition;
++	ranges[5] = config->max_handshake_attempts;
+ 
+ 	/* Keeps the junk buffer at an order GFP_KERNEL cannot fail to allocate. */
+-	if (config.junk_packet_max_size > MAX_JUNK_PACKET_SIZE) {
++	if (config->junk_packet_max_size > MAX_JUNK_PACKET_SIZE) {
+ 		net_dbg_ratelimited("%s: JunkPacketMaxSize: %d; should not exceed %d\n",
+-				    dev->name, config.junk_packet_max_size,
++				    dev->name, config->junk_packet_max_size,
+ 				    MAX_JUNK_PACKET_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+-	} else if (config.junk_packet_max_size < config.junk_packet_min_size) {
++	} else if (config->junk_packet_max_size < config->junk_packet_min_size) {
+ 		net_dbg_ratelimited("%s: maxSize: %d; should be greater than minSize: %d\n",
+-				    dev->name, config.junk_packet_max_size,
+-				    config.junk_packet_min_size);
++				    dev->name, config->junk_packet_max_size,
++				    config->junk_packet_min_size);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.init_packet_junk_size + MESSAGE_INITIATION_SIZE >= MESSAGE_MAX_SIZE) {
++	/* Junk packets all of one size are a signature of their own. */
++	if (config->junk_packet_count > 0 &&
++	    config->junk_packet_min_size == config->junk_packet_max_size &&
++	    config->junk_packet_max_size < MAX_JUNK_PACKET_SIZE)
++		config->junk_packet_max_size++;
++
++	if (config->init_packet_junk_size + MESSAGE_INITIATION_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: init header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+ 				    dev->name, MESSAGE_INITIATION_SIZE,
+-				    config.init_packet_junk_size, MESSAGE_MAX_SIZE);
++				    config->init_packet_junk_size, MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.response_packet_junk_size + MESSAGE_RESPONSE_SIZE >= MESSAGE_MAX_SIZE) {
++	if (config->response_packet_junk_size + MESSAGE_RESPONSE_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: response header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+ 				    dev->name, MESSAGE_RESPONSE_SIZE,
+-				    config.response_packet_junk_size,
++				    config->response_packet_junk_size,
+ 				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.cookie_packet_junk_size + MESSAGE_COOKIE_REPLY_SIZE >= MESSAGE_MAX_SIZE) {
++	if (config->cookie_packet_junk_size + MESSAGE_COOKIE_REPLY_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: cookie header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+ 				    dev->name, MESSAGE_COOKIE_REPLY_SIZE,
+-				    config.cookie_packet_junk_size,
++				    config->cookie_packet_junk_size,
+ 				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.transport_packet_junk_size + MESSAGE_TRANSPORT_SIZE >= MESSAGE_MAX_SIZE) {
++	if (config->transport_packet_junk_size + MESSAGE_TRANSPORT_SIZE >= MESSAGE_MAX_SIZE) {
+ 		net_dbg_ratelimited("%s: transport header size (%d) + junkSize (%d) should be smaller than maxSegmentSize: %d\n",
+ 				    dev->name, MESSAGE_TRANSPORT_SIZE,
+-				    config.transport_packet_junk_size,
++				    config->transport_packet_junk_size,
+ 				    MESSAGE_MAX_SIZE);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.has_header_protection_key ||
+-	    wg->header_protection.has_protection) {
++	if (config->has_header_protection_key) {
+ 		const u16 paddings[] = {
+-			config.init_packet_junk_size,
+-			config.response_packet_junk_size,
+-			config.cookie_packet_junk_size,
+-			config.transport_packet_junk_size,
++			config->init_packet_junk_size,
++			config->response_packet_junk_size,
++			config->cookie_packet_junk_size,
++			config->transport_packet_junk_size,
+ 		};
+ 
+ 		for (i = 0; i < ARRAY_SIZE(paddings); ++i) {
+-			if (paddings[i] < HEADER_PROTECTION_NONCE_SIZE) {
++			if (paddings[i] < WG_HEADER_PROTECTION_NONCE_SIZE) {
+ 				net_dbg_ratelimited("%s: S%d is %d; should be at least %d to carry a header protection nonce\n",
+ 						    dev->name, i + 1, paddings[i],
+-						    HEADER_PROTECTION_NONCE_SIZE);
++						    WG_HEADER_PROTECTION_NONCE_SIZE);
+ 				ret = -EINVAL;
+ 				goto out;
+ 			}
+ 		}
+ 	}
+ 
++	for (i = 0; i < ARRAY_SIZE(ranges); ++i) {
++		if (!wg_u16_range_is_valid(ranges[i])) {
++			net_dbg_ratelimited("%s: %s range is inverted\n",
++					    dev->name, range_names[i]);
++			ret = -EINVAL;
++			goto out;
++		}
++		/* Drawing zero from a duration stops the timer it arms from
++		 * ever waiting, so a configured one needs a positive floor.
++		 */
++		if (i < DURATION_RANGES && !wg_u16_range_is_zero(ranges[i]) &&
++		    !wg_u16_range_lo(ranges[i])) {
++			net_dbg_ratelimited("%s: %s cannot have a zero lower bound\n",
++					    dev->name, range_names[i]);
++			ret = -EINVAL;
++			goto out;
++		}
++	}
++
+ 	for (i = 0; i < ARRAY_SIZE(headers); ++i) {
++		if (!wg_u32_range_is_valid(headers[i])) {
++			net_dbg_ratelimited("%s: H%d range is inverted\n",
++					    dev->name, i + 1);
++			ret = -EINVAL;
++			goto out;
++		}
+ 		for (j = i + 1; j < ARRAY_SIZE(headers); ++j) {
+-			if (u32_range_overlap(headers[i], headers[j])) {
++			if (wg_u32_range_overlap(headers[i], headers[j])) {
+ 				net_dbg_ratelimited("%s: H%d and H%d ranges must not overlap\n",
+ 						    dev->name, i + 1, j + 1);
+ 				ret = -EINVAL;
+@@ -597,10 +649,10 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 		}
+ 	}
+ 
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
+-		if (!(ispec_mask & (1U << i)))
++	for (i = 0; i < ARRAY_SIZE(wg->junk_specs); ++i) {
++		if (!(junk_mask & (1U << i)))
+ 			continue;
+-		ret = jp_spec_parse(&parsed_ispecs[i], ispec_descs[i]);
++		ret = wg_junk_spec_parse(&parsed_specs[i], junk_descs[i]);
+ 		if (ret) {
+ 			net_dbg_ratelimited("%s: I%d-packet invalid format\n",
+ 					    dev->name, i + 1);
+@@ -608,33 +660,31 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 		}
+ 	}
+ 
+-	if (MESSAGE_INITIATION_SIZE + config.init_packet_junk_size ==
+-	    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size) {
++	if (MESSAGE_INITIATION_SIZE + config->init_packet_junk_size ==
++	    MESSAGE_RESPONSE_SIZE + config->response_packet_junk_size) {
+ 		net_dbg_ratelimited("%s: new init size:%d; and new response size:%d; should differ\n",
+ 				    dev->name,
+-				    MESSAGE_INITIATION_SIZE + config.init_packet_junk_size,
+-				    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size);
++				    MESSAGE_INITIATION_SIZE + config->init_packet_junk_size,
++				    MESSAGE_RESPONSE_SIZE + config->response_packet_junk_size);
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (config.has_header_protection_key)
+-		awg_header_protection_set_key(&wg->header_protection,
+-					      config.header_protection_key);
+-	memzero_explicit(config.header_protection_key,
+-			 sizeof(config.header_protection_key));
+-	config.has_header_protection_key = false;
++	old = wg_obfuscation_locked(wg);
++	rcu_assign_pointer(wg->obfuscation, config);
++	kfree_rcu(old, rcu);
++	config = NULL;
+ 
+-	wg->advanced_security_config = config;
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
+-		if (!(ispec_mask & (1U << i)))
++	for (i = 0; i < ARRAY_SIZE(wg->junk_specs); ++i) {
++		if (!(junk_mask & (1U << i)))
+ 			continue;
+-		jp_spec_commit(&wg->ispecs[i], ispec_descs[i],
+-			       &parsed_ispecs[i]);
+-		ispec_descs[i] = NULL;
++		wg_junk_spec_commit(&wg->junk_specs[i], junk_descs[i],
++				    &parsed_specs[i]);
++		junk_descs[i] = NULL;
+ 	}
+ out:
+-	for (i = 0; i < ARRAY_SIZE(parsed_ispecs); ++i)
+-		jp_spec_free_packet(&parsed_ispecs[i]);
++	kfree_sensitive(config);
++	for (i = 0; i < ARRAY_SIZE(parsed_specs); ++i)
++		wg_junk_spec_free_packet(&parsed_specs[i]);
+ 	return ret;
+ }
+diff --git a/drivers/net/wireguard/device.h b/drivers/net/wireguard/device.h
+index 5927187d8365..7534a4099bc9 100644
+--- a/drivers/net/wireguard/device.h
++++ b/drivers/net/wireguard/device.h
+@@ -12,13 +12,14 @@
+ #include "cookie.h"
+ #include "header_protection.h"
+ #include "junk.h"
+-#include "type.h"
++#include "range.h"
+ 
+ #include <linux/types.h>
+ #include <linux/netdevice.h>
+ #include <linux/workqueue.h>
+ #include <linux/mutex.h>
+ #include <linux/net.h>
++#include <linux/rcupdate.h>
+ #include <linux/ptr_ring.h>
+ 
+ struct wg_device;
+@@ -40,8 +41,9 @@ struct prev_queue {
+ 	atomic_t count;
+ };
+ 
+-struct amnezia_config {
+-	u8 header_protection_key[HEADER_PROTECTION_KEY_SIZE];
++struct wg_obfuscation {
++	struct rcu_head rcu;
++	u32 header_protection_key[CHACHA_KEY_WORDS];
+ 	bool has_header_protection_key;
+ 	bool random_trailers;
+ 	bool disable_cookies;
+@@ -52,16 +54,16 @@ struct amnezia_config {
+ 	u16 response_packet_junk_size;
+ 	u16 cookie_packet_junk_size;
+ 	u16 transport_packet_junk_size;
+-	u16_range_t content_padding_addition;
+-	u16_range_t rekey_after_time;
+-	u16_range_t rekey_timeout;
+-	u16_range_t reject_after_time;
+-	u16_range_t keepalive_timeout;
+-	u16_range_t max_handshake_attempts;
+-	u32_range_t init_packet_magic_header;
+-	u32_range_t response_packet_magic_header;
+-	u32_range_t cookie_packet_magic_header;
+-	u32_range_t transport_packet_magic_header;
++	struct wg_u16_range content_padding_addition;
++	struct wg_u16_range rekey_after_time;
++	struct wg_u16_range rekey_timeout;
++	struct wg_u16_range reject_after_time;
++	struct wg_u16_range keepalive_timeout;
++	struct wg_u16_range max_handshake_attempts;
++	struct wg_u32_range init_packet_magic_header;
++	struct wg_u32_range response_packet_magic_header;
++	struct wg_u32_range cookie_packet_magic_header;
++	struct wg_u32_range transport_packet_magic_header;
+ };
+ 
+ struct wg_device {
+@@ -77,18 +79,39 @@ struct wg_device {
+ 	struct allowedips peer_allowedips;
+ 	struct mutex device_update_lock, socket_update_lock;
+ 	struct list_head device_list, peer_list;
+-	struct amnezia_config advanced_security_config;
+-	struct header_protection header_protection;
+-	struct jp_spec ispecs[5];
++	struct wg_obfuscation __rcu *obfuscation;
++	struct wg_junk_spec junk_specs[5];
+ 	atomic_t handshake_queue_len;
+ 	unsigned int num_peers, device_update_gen;
+ 	u32 fwmark;
+ 	u16 incoming_port;
+ };
+ 
++/* Published whole, never field by field, so a reader always sees one
++ * self-consistent configuration.
++ */
++static inline struct wg_obfuscation *
++wg_obfuscation_locked(struct wg_device *wg)
++{
++	return rcu_dereference_protected(wg->obfuscation,
++					 lockdep_is_held(&wg->device_update_lock));
++}
++
++/* The send paths sleep, so they cannot hold an RCU read section across the
++ * whole of the work a single configuration has to stay consistent for.
++ */
++static inline void wg_obfuscation_snapshot(struct wg_device *wg,
++					   struct wg_obfuscation *snapshot)
++{
++	rcu_read_lock();
++	*snapshot = *rcu_dereference(wg->obfuscation);
++	rcu_read_unlock();
++}
++
+ int wg_device_init(void);
+ void wg_device_uninit(void);
+-int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *asc,
+-				 char **ispec_descs, u32 ispec_mask);
++int wg_device_handle_post_config(struct net_device *dev,
++				 const struct wg_obfuscation *staged,
++				 char **junk_descs, u32 junk_mask);
+ 
+ #endif /* _WG_DEVICE_H */
+diff --git a/drivers/net/wireguard/header_protection.c b/drivers/net/wireguard/header_protection.c
+index 81526d33d391..7f005dc8a218 100644
+--- a/drivers/net/wireguard/header_protection.c
++++ b/drivers/net/wireguard/header_protection.c
+@@ -5,51 +5,49 @@
+ 
+ #include <linux/unaligned.h>
+ 
+-bool awg_header_protection_init(struct chacha_state *state,
+-				struct wg_device *wg, const u8 *nonce)
++bool wg_header_protection_init_state(struct chacha_state *state,
++				     const struct wg_obfuscation *cfg,
++				     const u8 *nonce)
+ {
+-	struct header_protection *p = &wg->header_protection;
+ 	u8 iv[CHACHA_IV_SIZE];
+-	bool res = false;
+ 
+-	down_read(&p->lock);
+-	if (!p->has_protection)
+-		goto out;
++	if (!cfg->has_header_protection_key)
++		return false;
+ 
+-	memset(iv, 0, CHACHA_IV_SIZE - HEADER_PROTECTION_NONCE_SIZE);
+-	memcpy(iv + CHACHA_IV_SIZE - HEADER_PROTECTION_NONCE_SIZE, nonce,
+-	       HEADER_PROTECTION_NONCE_SIZE);
+-	chacha_init(state, p->key, iv);
+-	res = true;
+-out:
+-	up_read(&p->lock);
+-	return res;
++	memset(iv, 0, CHACHA_IV_SIZE - WG_HEADER_PROTECTION_NONCE_SIZE);
++	memcpy(iv + CHACHA_IV_SIZE - WG_HEADER_PROTECTION_NONCE_SIZE, nonce,
++	       WG_HEADER_PROTECTION_NONCE_SIZE);
++	chacha_init(state, cfg->header_protection_key, iv);
++	return true;
+ }
+ 
+-void awg_header_protection_set_key(struct header_protection *p,
+-				   const u8 key[HEADER_PROTECTION_KEY_SIZE])
++/* An all zero key removes header protection, as an all zero private key
++ * removes the static identity.
++ */
++void wg_header_protection_set_key(struct wg_obfuscation *cfg,
++				  const u8 key[WG_HEADER_PROTECTION_KEY_SIZE])
+ {
++	bool has_key = false;
+ 	int i;
+ 
+-	down_write(&p->lock);
+-	for (i = 0; i < CHACHA_KEY_WORDS; ++i)
+-		p->key[i] = get_unaligned_le32(key + i * sizeof(u32));
+-	p->has_protection = true;
+-	up_write(&p->lock);
+-}
+-
+-bool awg_header_protection_get_key(struct header_protection *p,
+-				   u8 key[HEADER_PROTECTION_KEY_SIZE])
+-{
+-	bool res;
+-	int i;
+-
+-	down_read(&p->lock);
+-	res = p->has_protection;
+-	if (res) {
+-		for (i = 0; i < CHACHA_KEY_WORDS; ++i)
+-			put_unaligned_le32(p->key[i], key + i * sizeof(u32));
++	for (i = 0; i < CHACHA_KEY_WORDS; ++i) {
++		cfg->header_protection_key[i] =
++			get_unaligned_le32(key + i * sizeof(u32));
++		has_key |= !!cfg->header_protection_key[i];
+ 	}
+-	up_read(&p->lock);
+-	return res;
++	cfg->has_header_protection_key = has_key;
++}
++
++bool wg_header_protection_get_key(const struct wg_obfuscation *cfg,
++				  u8 key[WG_HEADER_PROTECTION_KEY_SIZE])
++{
++	int i;
++
++	if (!cfg->has_header_protection_key)
++		return false;
++
++	for (i = 0; i < CHACHA_KEY_WORDS; ++i)
++		put_unaligned_le32(cfg->header_protection_key[i],
++				   key + i * sizeof(u32));
++	return true;
+ }
+diff --git a/drivers/net/wireguard/header_protection.h b/drivers/net/wireguard/header_protection.h
+index 7d86a66e68c5..79f233b6967a 100644
+--- a/drivers/net/wireguard/header_protection.h
++++ b/drivers/net/wireguard/header_protection.h
+@@ -3,27 +3,21 @@
+ #define _WG_HEADER_PROTECTION_H
+ 
+ #include <linux/types.h>
+-#include <linux/rwsem.h>
+ #include <crypto/chacha.h>
+ 
+-struct wg_device;
++struct wg_obfuscation;
+ 
+-enum header_protection_lengths {
+-	HEADER_PROTECTION_KEY_SIZE = CHACHA_KEY_SIZE,
+-	HEADER_PROTECTION_NONCE_SIZE = 12
++enum wg_header_protection_lengths {
++	WG_HEADER_PROTECTION_KEY_SIZE = CHACHA_KEY_SIZE,
++	WG_HEADER_PROTECTION_NONCE_SIZE = 12
+ };
+ 
+-struct header_protection {
+-	u32 key[CHACHA_KEY_WORDS];
+-	struct rw_semaphore lock;
+-	bool has_protection;
+-};
+-
+-bool awg_header_protection_init(struct chacha_state *state,
+-				struct wg_device *wg, const u8 *nonce);
+-void awg_header_protection_set_key(struct header_protection *p,
+-				   const u8 key[HEADER_PROTECTION_KEY_SIZE]);
+-bool awg_header_protection_get_key(struct header_protection *p,
+-				   u8 key[HEADER_PROTECTION_KEY_SIZE]);
++bool wg_header_protection_init_state(struct chacha_state *state,
++				     const struct wg_obfuscation *cfg,
++				     const u8 *nonce);
++void wg_header_protection_set_key(struct wg_obfuscation *cfg,
++				  const u8 key[WG_HEADER_PROTECTION_KEY_SIZE]);
++bool wg_header_protection_get_key(const struct wg_obfuscation *cfg,
++				  u8 key[WG_HEADER_PROTECTION_KEY_SIZE]);
+ 
+ #endif /* _WG_HEADER_PROTECTION_H */
+diff --git a/drivers/net/wireguard/junk.c b/drivers/net/wireguard/junk.c
+index 427ba417021e..5a7e77f6deb0 100644
+--- a/drivers/net/wireguard/junk.c
++++ b/drivers/net/wireguard/junk.c
+@@ -12,9 +12,16 @@
+ #include <linux/slab.h>
+ #include <linux/string.h>
+ 
++struct wg_junk_tag {
++	u8 *pkt;
++	wg_junk_modifier_fn func;
++	struct list_head head;
++	int pkt_len;
++};
++
+ static int parse_b_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 	u8 *pkt;
+ 	int err;
+ 	int i;
+@@ -49,7 +56,7 @@ static int parse_b_tag(char *val, struct list_head *head)
+ 	}
+ 
+ 	tag->pkt = pkt;
+-	tag->pkt_size = len;
++	tag->pkt_len = len;
+ 	list_add(&tag->head, head);
+ 	return 0;
+ 
+@@ -60,7 +67,7 @@ err_free_pkt:
+ 
+ static void pkt_counter_modifier(char *buf, int len, struct wg_peer *peer)
+ {
+-	u32 value = atomic_read(&peer->jp_packet_counter);
++	u32 value = atomic_read(&peer->junk_counter);
+ 
+ 	buf[0] = value >> 24;
+ 	buf[1] = value >> 16;
+@@ -70,7 +77,7 @@ static void pkt_counter_modifier(char *buf, int len, struct wg_peer *peer)
+ 
+ static int parse_c_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 
+ 	if (val)
+ 		return -EINVAL;
+@@ -79,7 +86,7 @@ static int parse_c_tag(char *val, struct list_head *head)
+ 	if (!tag)
+ 		return -ENOMEM;
+ 
+-	tag->pkt_size = sizeof(u32);
++	tag->pkt_len = sizeof(u32);
+ 	tag->func = pkt_counter_modifier;
+ 	list_add(&tag->head, head);
+ 	return 0;
+@@ -97,7 +104,7 @@ static void unix_time_modifier(char *buf, int len, struct wg_peer *peer)
+ 
+ static int parse_t_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 
+ 	if (val)
+ 		return -EINVAL;
+@@ -106,7 +113,7 @@ static int parse_t_tag(char *val, struct list_head *head)
+ 	if (!tag)
+ 		return -ENOMEM;
+ 
+-	tag->pkt_size = sizeof(u32);
++	tag->pkt_len = sizeof(u32);
+ 	tag->func = unix_time_modifier;
+ 	list_add(&tag->head, head);
+ 	return 0;
+@@ -119,7 +126,7 @@ static void random_byte_modifier(char *buf, int len, struct wg_peer *peer)
+ 
+ static int parse_r_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 	int len;
+ 
+ 	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+@@ -129,7 +136,7 @@ static int parse_r_tag(char *val, struct list_head *head)
+ 	if (!tag)
+ 		return -ENOMEM;
+ 
+-	tag->pkt_size = len;
++	tag->pkt_len = len;
+ 	tag->func = random_byte_modifier;
+ 	list_add(&tag->head, head);
+ 	return 0;
+@@ -151,7 +158,7 @@ static void random_char_modifier(char *buf, int len, struct wg_peer *peer)
+ 
+ static int parse_rc_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 	int len;
+ 
+ 	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+@@ -161,7 +168,7 @@ static int parse_rc_tag(char *val, struct list_head *head)
+ 	if (!tag)
+ 		return -ENOMEM;
+ 
+-	tag->pkt_size = len;
++	tag->pkt_len = len;
+ 	tag->func = random_char_modifier;
+ 	list_add(&tag->head, head);
+ 	return 0;
+@@ -179,7 +186,7 @@ static void random_digit_modifier(char *buf, int len, struct wg_peer *peer)
+ 
+ static int parse_rd_tag(char *val, struct list_head *head)
+ {
+-	struct jp_tag *tag;
++	struct wg_junk_tag *tag;
+ 	int len;
+ 
+ 	if (!val || kstrtoint(val, 10, &len) < 0 || len <= 0)
+@@ -189,13 +196,13 @@ static int parse_rd_tag(char *val, struct list_head *head)
+ 	if (!tag)
+ 		return -ENOMEM;
+ 
+-	tag->pkt_size = len;
++	tag->pkt_len = len;
+ 	tag->func = random_digit_modifier;
+ 	list_add(&tag->head, head);
+ 	return 0;
+ }
+ 
+-int jp_parse_tags(char *str, struct list_head *head)
++static int parse_tags(char *str, struct list_head *head)
+ {
+ 	char *key;
+ 	char *val;
+@@ -231,39 +238,34 @@ int jp_parse_tags(char *str, struct list_head *head)
+ 	return 0;
+ }
+ 
+-void jp_tag_free(struct jp_tag *tag)
+-{
+-	kfree(tag->pkt);
+-}
+-
+-void jp_spec_free_packet(struct jp_spec *spec)
++void wg_junk_spec_free_packet(struct wg_junk_spec *spec)
+ {
+ 	kfree(spec->pkt);
+ 	spec->pkt = NULL;
+ 	kfree(spec->mods);
+ 	spec->mods = NULL;
+-	spec->pkt_size = 0;
+-	spec->mods_size = 0;
++	spec->pkt_len = 0;
++	spec->n_mods = 0;
+ }
+ 
+-void jp_spec_free(struct jp_spec *spec)
++void wg_junk_spec_free(struct wg_junk_spec *spec)
+ {
+ 	kfree(spec->desc);
+ 	spec->desc = NULL;
+-	jp_spec_free_packet(spec);
++	wg_junk_spec_free_packet(spec);
+ }
+ 
+-int jp_spec_parse(struct jp_spec *spec, const char *desc)
++int wg_junk_spec_parse(struct wg_junk_spec *spec, const char *desc)
+ {
+-	struct jp_modifier *mod;
+-	struct jp_tag *tag, *tmp;
++	struct wg_junk_modifier *mod;
++	struct wg_junk_tag *tag, *tmp;
+ 	char *buf = NULL;
+ 	int err = 0;
+-	int mods_size;
+-	int pkt_size;
++	int n_mods;
++	int pkt_len;
+ 	LIST_HEAD(head);
+ 
+-	jp_spec_free_packet(spec);
++	wg_junk_spec_free_packet(spec);
+ 
+ 	if (!desc)
+ 		return 0;
+@@ -274,24 +276,24 @@ int jp_spec_parse(struct jp_spec *spec, const char *desc)
+ 		goto out;
+ 	}
+ 
+-	err = jp_parse_tags(buf, &head);
++	err = parse_tags(buf, &head);
+ 	if (err)
+ 		goto out;
+ 
+-	pkt_size = 0;
+-	mods_size = 0;
++	pkt_len = 0;
++	n_mods = 0;
+ 	list_for_each_entry(tag, &head, head) {
+-		if (tag->pkt_size > MESSAGE_MAX_SIZE - pkt_size) {
++		if (tag->pkt_len > MESSAGE_MAX_SIZE - pkt_len) {
+ 			err = -EINVAL;
+ 			goto out;
+ 		}
+-		pkt_size += tag->pkt_size;
++		pkt_len += tag->pkt_len;
+ 		if (tag->func)
+-			++mods_size;
++			++n_mods;
+ 	}
+ 
+-	spec->pkt = kzalloc(pkt_size, GFP_KERNEL);
+-	spec->mods = kcalloc(mods_size, sizeof(*spec->mods), GFP_KERNEL);
++	spec->pkt = kzalloc(pkt_len, GFP_KERNEL);
++	spec->mods = kcalloc(n_mods, sizeof(*spec->mods), GFP_KERNEL);
+ 	if (!spec->pkt || !spec->mods) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -299,64 +301,54 @@ int jp_spec_parse(struct jp_spec *spec, const char *desc)
+ 
+ 	list_for_each_entry_reverse(tag, &head, head) {
+ 		if (tag->pkt)
+-			memcpy(spec->pkt + spec->pkt_size, tag->pkt, tag->pkt_size);
++			memcpy(spec->pkt + spec->pkt_len, tag->pkt, tag->pkt_len);
+ 
+ 		if (tag->func) {
+-			mod = spec->mods + spec->mods_size;
++			mod = spec->mods + spec->n_mods;
+ 			mod->func = tag->func;
+-			mod->buf = spec->pkt + spec->pkt_size;
+-			mod->buf_len = tag->pkt_size;
+-			spec->mods_size++;
++			mod->buf = spec->pkt + spec->pkt_len;
++			mod->buf_len = tag->pkt_len;
++			spec->n_mods++;
+ 		}
+ 
+-		spec->pkt_size += tag->pkt_size;
++		spec->pkt_len += tag->pkt_len;
+ 	}
+ 
+ out:
+ 	if (err)
+-		jp_spec_free_packet(spec);
++		wg_junk_spec_free_packet(spec);
+ 	list_for_each_entry_safe(tag, tmp, &head, head) {
+-		jp_tag_free(tag);
+ 		list_del(&tag->head);
++		kfree(tag->pkt);
+ 		kfree(tag);
+ 	}
+ 	kfree(buf);
+ 	return err;
+ }
+ 
+-int jp_spec_setup(struct jp_spec *spec)
+-{
+-	int err;
+-
+-	mutex_lock(&spec->lock);
+-	err = jp_spec_parse(spec, spec->desc);
+-	mutex_unlock(&spec->lock);
+-	return err;
+-}
+-
+-void jp_spec_commit(struct jp_spec *spec, char *desc, struct jp_spec *parsed)
++void wg_junk_spec_commit(struct wg_junk_spec *spec, char *desc, struct wg_junk_spec *parsed)
+ {
+ 	mutex_lock(&spec->lock);
+ 	kfree(spec->desc);
+-	jp_spec_free_packet(spec);
++	wg_junk_spec_free_packet(spec);
+ 	spec->desc = desc;
+ 	spec->pkt = parsed->pkt;
+ 	spec->mods = parsed->mods;
+-	spec->pkt_size = parsed->pkt_size;
+-	spec->mods_size = parsed->mods_size;
++	spec->pkt_len = parsed->pkt_len;
++	spec->n_mods = parsed->n_mods;
+ 	parsed->pkt = NULL;
+ 	parsed->mods = NULL;
+-	parsed->pkt_size = 0;
+-	parsed->mods_size = 0;
++	parsed->pkt_len = 0;
++	parsed->n_mods = 0;
+ 	mutex_unlock(&spec->lock);
+ }
+ 
+-void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer)
++void wg_junk_spec_apply_mods(struct wg_junk_spec *spec, struct wg_peer *peer)
+ {
+-	struct jp_modifier *mod;
++	struct wg_junk_modifier *mod;
+ 	int i;
+ 
+-	for (i = 0; i < spec->mods_size; ++i) {
++	for (i = 0; i < spec->n_mods; ++i) {
+ 		mod = &spec->mods[i];
+ 		if (mod->func)
+ 			mod->func(mod->buf, mod->buf_len, peer);
+diff --git a/drivers/net/wireguard/junk.h b/drivers/net/wireguard/junk.h
+index 9d6f614d8e2a..b2b4c3b591e2 100644
+--- a/drivers/net/wireguard/junk.h
++++ b/drivers/net/wireguard/junk.h
+@@ -2,43 +2,38 @@
+ #ifndef _WG_JUNK_H
+ #define _WG_JUNK_H
+ 
+-#include <linux/list.h>
+ #include <linux/mutex.h>
+ 
+ struct wg_peer;
+ 
+-typedef void (*jp_modifier_func)(char *buf, int len, struct wg_peer *peer);
++/* Longest I1-I5 descriptor accepted, matching what wg(8) sends. Anything
++ * this length describes is bounded again by MESSAGE_MAX_SIZE once parsed.
++ */
++enum { WG_JUNK_DESC_MAX_LEN = 5120 };
+ 
+-struct jp_tag {
+-	u8 *pkt;
+-	jp_modifier_func func;
+-	struct list_head head;
+-	int pkt_size;
+-};
++typedef void (*wg_junk_modifier_fn)(char *buf, int len, struct wg_peer *peer);
+ 
+-struct jp_modifier {
+-	jp_modifier_func func;
++struct wg_junk_modifier {
++	wg_junk_modifier_fn func;
+ 	char *buf;
+ 	int buf_len;
+ };
+ 
+-struct jp_spec {
++struct wg_junk_spec {
+ 	char *desc;
+ 	u8 *pkt;
+-	struct jp_modifier *mods;
++	struct wg_junk_modifier *mods;
+ 	/* Protects packet bytes while dynamic fields are refreshed for send. */
+ 	struct mutex lock;
+-	int pkt_size;
+-	int mods_size;
++	int pkt_len;
++	int n_mods;
+ };
+ 
+-void jp_tag_free(struct jp_tag *tag);
+-int jp_parse_tags(char *str, struct list_head *head);
+-void jp_spec_free(struct jp_spec *spec);
+-void jp_spec_free_packet(struct jp_spec *spec);
+-int jp_spec_parse(struct jp_spec *spec, const char *desc);
+-int jp_spec_setup(struct jp_spec *spec);
+-void jp_spec_commit(struct jp_spec *spec, char *desc, struct jp_spec *parsed);
+-void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer);
++void wg_junk_spec_free(struct wg_junk_spec *spec);
++void wg_junk_spec_free_packet(struct wg_junk_spec *spec);
++int wg_junk_spec_parse(struct wg_junk_spec *spec, const char *desc);
++void wg_junk_spec_commit(struct wg_junk_spec *spec, char *desc,
++			 struct wg_junk_spec *parsed);
++void wg_junk_spec_apply_mods(struct wg_junk_spec *spec, struct wg_peer *peer);
+ 
+ #endif /* _WG_JUNK_H */
+diff --git a/drivers/net/wireguard/messages.h b/drivers/net/wireguard/messages.h
+index 47d5123d5f80..6be5111b47a3 100644
+--- a/drivers/net/wireguard/messages.h
++++ b/drivers/net/wireguard/messages.h
+@@ -51,7 +51,7 @@ enum limits {
+ 	MAX_QUEUED_INCOMING_HANDSHAKES = 4096, /* TODO: replace this with DQL */
+ 	MAX_STAGED_PACKETS = 128,
+ 	MAX_QUEUED_PACKETS = 1024, /* TODO: replace this with DQL */
+-	DEFAULT_UDP_WINDOW = 500
++	DEFAULT_PEER_PACKET_SIZE = 500
+ };
+ 
+ enum message_type {
+@@ -127,8 +127,6 @@ enum message_size {
+ 	MAX_JUNK_PACKET_SIZE = 32768
+ };
+ 
+-#define SKB_TYPE_LE32(skb) (((struct message_header *)(skb)->data)->type)
+-
+ #define SKB_HEADER_LEN                                       \
+ 	(max(sizeof(struct iphdr), sizeof(struct ipv6hdr)) + \
+ 	 sizeof(struct udphdr) + NET_SKB_PAD)
+diff --git a/drivers/net/wireguard/netlink.c b/drivers/net/wireguard/netlink.c
+index d60ad82cb501..7ecaeebbe25d 100644
+--- a/drivers/net/wireguard/netlink.c
++++ b/drivers/net/wireguard/netlink.c
+@@ -6,13 +6,12 @@
+ #include "netlink.h"
+ #include "device.h"
+ #include "header_protection.h"
+-#include "linux/kernel.h"
+-#include "net/net_namespace.h"
+ #include "peer.h"
+ #include "socket.h"
+ #include "queueing.h"
+ #include "messages.h"
+ 
++#include <uapi/linux/net_namespace.h>
+ #include <uapi/linux/wireguard.h>
+ 
+ #include <linux/if.h>
+@@ -43,13 +42,18 @@ static const struct nla_policy device_policy[WGDEVICE_A_MAX + 1] = {
+ 	[WGDEVICE_A_PEER]		= { .type = NLA_NESTED },
+ 	[WGDEVICE_A_S3]			= { .type = NLA_U16 },
+ 	[WGDEVICE_A_S4]			= { .type = NLA_U16 },
+-	[WGDEVICE_A_I1]			= { .type = NLA_NUL_STRING },
+-	[WGDEVICE_A_I2]			= { .type = NLA_NUL_STRING },
+-	[WGDEVICE_A_I3]			= { .type = NLA_NUL_STRING },
+-	[WGDEVICE_A_I4]			= { .type = NLA_NUL_STRING },
+-	[WGDEVICE_A_I5]			= { .type = NLA_NUL_STRING },
++	[WGDEVICE_A_I1]			= { .type = NLA_NUL_STRING,
++				    .len = WG_JUNK_DESC_MAX_LEN },
++	[WGDEVICE_A_I2]			= { .type = NLA_NUL_STRING,
++				    .len = WG_JUNK_DESC_MAX_LEN },
++	[WGDEVICE_A_I3]			= { .type = NLA_NUL_STRING,
++				    .len = WG_JUNK_DESC_MAX_LEN },
++	[WGDEVICE_A_I4]			= { .type = NLA_NUL_STRING,
++				    .len = WG_JUNK_DESC_MAX_LEN },
++	[WGDEVICE_A_I5]			= { .type = NLA_NUL_STRING,
++				    .len = WG_JUNK_DESC_MAX_LEN },
+ 	[WGDEVICE_A_HEADER_PROTECTION_KEY] =
+-		NLA_POLICY_EXACT_LEN(HEADER_PROTECTION_KEY_SIZE),
++		NLA_POLICY_EXACT_LEN(WG_HEADER_PROTECTION_KEY_SIZE),
+ 	[WGDEVICE_A_CONTENT_PADDING_ADDITION]	= { .type = NLA_U32 },
+ 	[WGDEVICE_A_REKEY_AFTER_TIME]	= { .type = NLA_U32 },
+ 	[WGDEVICE_A_REKEY_TIMEOUT]	= { .type = NLA_U32 },
+@@ -66,7 +70,7 @@ static const struct nla_policy peer_policy[WGPEER_A_MAX + 1] = {
+ 	[WGPEER_A_PRESHARED_KEY]			= NLA_POLICY_EXACT_LEN(NOISE_SYMMETRIC_KEY_LEN),
+ 	[WGPEER_A_FLAGS]				= NLA_POLICY_MASK(NLA_U32, __WGPEER_F_ALL),
+ 	[WGPEER_A_ENDPOINT]				= NLA_POLICY_MIN_LEN(sizeof(struct sockaddr)),
+-	[WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL]	= { .type = NLA_U32 },
++	[WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL]	= NLA_POLICY_MIN_LEN(sizeof(u16)),
+ 	[WGPEER_A_LAST_HANDSHAKE_TIME]			= NLA_POLICY_EXACT_LEN(sizeof(struct __kernel_timespec)),
+ 	[WGPEER_A_RX_BYTES]				= { .type = NLA_U64 },
+ 	[WGPEER_A_TX_BYTES]				= { .type = NLA_U64 },
+@@ -85,6 +89,36 @@ static const struct nla_policy allowedip_policy[WGALLOWEDIP_A_MAX + 1] = {
+ 	[WGALLOWEDIP_A_FLAGS]		= NLA_POLICY_MASK(NLA_U32, __WGALLOWEDIP_F_ALL),
+ };
+ 
++static struct wg_u16_range get_u16_range(const struct nlattr *attr)
++{
++	return wg_u16_range_from_packed(nla_get_u32(attr));
++}
++
++static struct wg_u32_range get_u32_range(const struct nlattr *attr)
++{
++	return wg_u32_range_from_packed(nla_get_u64(attr));
++}
++
++/* A u16 is the interval plain WireGuard has always sent, a u32 the packed
++ * range AmneziaWG widened it to.
++ */
++static int get_keepalive_range(const struct nlattr *attr,
++			       struct wg_u16_range *range)
++{
++	u16 interval;
++
++	switch (nla_len(attr)) {
++	case sizeof(u16):
++		interval = nla_get_u16(attr);
++		wg_u16_range_init(range, interval, interval);
++		return 0;
++	case sizeof(u32):
++		*range = wg_u16_range_from_packed(nla_get_u32(attr));
++		return wg_u16_range_is_valid(*range) ? 0 : -EINVAL;
++	}
++	return -EINVAL;
++}
++
+ static struct wg_device *lookup_interface(struct nlattr **attrs,
+ 					  struct sk_buff *skb)
+ {
+@@ -141,7 +175,6 @@ struct dump_ctx {
+ static int
+ get_peer(struct wg_peer *peer, struct sk_buff *skb, struct dump_ctx *ctx)
+ {
+-
+ 	struct nlattr *allowedips_nest, *peer_nest = nla_nest_start(skb, 0);
+ 	struct allowedips_node *allowedips_node = ctx->next_allowedip;
+ 	bool fail;
+@@ -157,10 +190,14 @@ get_peer(struct wg_peer *peer, struct sk_buff *skb, struct dump_ctx *ctx)
+ 		goto err;
+ 
+ 	if (!allowedips_node) {
++		const struct wg_u16_range keepalive =
++			peer->persistent_keepalive_interval;
+ 		const struct __kernel_timespec last_handshake = {
+ 			.tv_sec = peer->walltime_last_handshake.tv_sec,
+ 			.tv_nsec = peer->walltime_last_handshake.tv_nsec
+ 		};
++		const u32 persistent_keepalive_interval =
++			wg_u16_range_packed(keepalive);
+ 
+ 		down_read(&peer->handshake.lock);
+ 		fail = nla_put(skb, WGPEER_A_PRESHARED_KEY,
+@@ -173,7 +210,7 @@ get_peer(struct wg_peer *peer, struct sk_buff *skb, struct dump_ctx *ctx)
+ 		if (nla_put(skb, WGPEER_A_LAST_HANDSHAKE_TIME,
+ 			    sizeof(last_handshake), &last_handshake) ||
+ 		    nla_put_u32(skb, WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL,
+-				peer->persistent_keepalive_interval) ||
++				persistent_keepalive_interval) ||
+ 		    nla_put_u64_64bit(skb, WGPEER_A_TX_BYTES, peer->tx_bytes,
+ 				      WGPEER_A_UNSPEC) ||
+ 		    nla_put_u64_64bit(skb, WGPEER_A_RX_BYTES, peer->rx_bytes,
+@@ -260,16 +297,16 @@ static int wg_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
+ 	int ret = -EMSGSIZE;
+ 	bool done = true;
+ 	void *hdr;
+-	int creating_nsid = -1;
+-	u8 key[HEADER_PROTECTION_KEY_SIZE];
++	int creating_nsid = NETNSA_NSID_NOT_ASSIGNED;
++	u8 key[WG_HEADER_PROTECTION_KEY_SIZE];
+ 	struct net *creating_net;
+-	struct net *current_net = current->nsproxy->net_ns;
++	struct net *net = sock_net(cb->skb->sk);
+ 
+ 	rcu_read_lock();
+ 	creating_net = rcu_dereference(wg->creating_net);
++	if (creating_net && !net_eq(creating_net, net))
++		creating_nsid = peernet2id_alloc(net, creating_net, GFP_ATOMIC);
+ 	rcu_read_unlock();
+-	if (creating_net && creating_net != current_net)
+-		creating_nsid = peernet2id(current_net, creating_net);
+ 
+ 	rtnl_lock();
+ 	mutex_lock(&wg->device_update_lock);
+@@ -283,65 +320,89 @@ static int wg_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
+ 	genl_dump_check_consistent(cb, hdr);
+ 
+ 	if (!ctx->next_peer) {
+-		if (nla_put_u16(skb, WGDEVICE_A_LISTEN_PORT,
+-				wg->incoming_port) ||
++		const struct wg_obfuscation *config = wg_obfuscation_locked(wg);
++		const u64 init_packet_magic_header =
++			wg_u32_range_packed(config->init_packet_magic_header);
++		const u64 response_packet_magic_header =
++			wg_u32_range_packed(config->response_packet_magic_header);
++		const u64 cookie_packet_magic_header =
++			wg_u32_range_packed(config->cookie_packet_magic_header);
++		const u64 transport_packet_magic_header =
++			wg_u32_range_packed(config->transport_packet_magic_header);
++		const u32 content_padding_addition =
++			wg_u16_range_packed(config->content_padding_addition);
++		const u32 rekey_after_time =
++			wg_u16_range_packed(config->rekey_after_time);
++		const u32 rekey_timeout =
++			wg_u16_range_packed(config->rekey_timeout);
++		const u32 reject_after_time =
++			wg_u16_range_packed(config->reject_after_time);
++		const u32 keepalive_timeout =
++			wg_u16_range_packed(config->keepalive_timeout);
++		const u32 max_handshake_attempts =
++			wg_u16_range_packed(config->max_handshake_attempts);
++
++		if (nla_put_u16(skb, WGDEVICE_A_LISTEN_PORT, wg->incoming_port) ||
+ 		    nla_put_u32(skb, WGDEVICE_A_FWMARK, wg->fwmark) ||
+ 		    nla_put_u32(skb, WGDEVICE_A_IFINDEX, wg->dev->ifindex) ||
+ 		    nla_put_string(skb, WGDEVICE_A_IFNAME, wg->dev->name) ||
+-		    nla_put_u16(skb, WGDEVICE_A_JC,
+-					    wg->advanced_security_config.junk_packet_count) ||
++		    nla_put_u16(skb, WGDEVICE_A_JC, config->junk_packet_count) ||
+ 		    nla_put_u16(skb, WGDEVICE_A_JMIN,
+-					    wg->advanced_security_config.junk_packet_min_size) ||
++				config->junk_packet_min_size) ||
+ 		    nla_put_u16(skb, WGDEVICE_A_JMAX,
+-					    wg->advanced_security_config.junk_packet_max_size) ||
+-			    nla_put_u16(skb, WGDEVICE_A_S1,
+-					    wg->advanced_security_config.init_packet_junk_size) ||
+-			    nla_put_u16(skb, WGDEVICE_A_S2,
+-					    wg->advanced_security_config.response_packet_junk_size) ||
+-			    nla_put_u16(skb, WGDEVICE_A_S3,
+-					    wg->advanced_security_config.cookie_packet_junk_size) ||
+-			    nla_put_u16(skb, WGDEVICE_A_S4,
+-					    wg->advanced_security_config.transport_packet_junk_size) ||
+-			    nla_put(skb, WGDEVICE_A_H1, sizeof(u64),
+-				    &wg->advanced_security_config.init_packet_magic_header) ||
+-			    nla_put(skb, WGDEVICE_A_H2, sizeof(u64),
+-				    &wg->advanced_security_config.response_packet_magic_header) ||
+-			    nla_put(skb, WGDEVICE_A_H3, sizeof(u64),
+-				    &wg->advanced_security_config.cookie_packet_magic_header) ||
+-			    nla_put(skb, WGDEVICE_A_H4, sizeof(u64),
+-				    &wg->advanced_security_config.transport_packet_magic_header) ||
+-			    (wg->ispecs[0].desc &&
+-			     nla_put_string(skb, WGDEVICE_A_I1, wg->ispecs[0].desc)) ||
+-			    (wg->ispecs[1].desc &&
+-			     nla_put_string(skb, WGDEVICE_A_I2, wg->ispecs[1].desc)) ||
+-			    (wg->ispecs[2].desc &&
+-			     nla_put_string(skb, WGDEVICE_A_I3, wg->ispecs[2].desc)) ||
+-			    (wg->ispecs[3].desc &&
+-			     nla_put_string(skb, WGDEVICE_A_I4, wg->ispecs[3].desc)) ||
+-			    (wg->ispecs[4].desc &&
+-			     nla_put_string(skb, WGDEVICE_A_I5, wg->ispecs[4].desc)) ||
+-			    nla_put_u32(skb, WGDEVICE_A_CONTENT_PADDING_ADDITION,
+-					wg->advanced_security_config.content_padding_addition) ||
+-			    nla_put_u32(skb, WGDEVICE_A_REKEY_AFTER_TIME,
+-					wg->advanced_security_config.rekey_after_time) ||
+-			    nla_put_u32(skb, WGDEVICE_A_REKEY_TIMEOUT,
+-					wg->advanced_security_config.rekey_timeout) ||
+-			    nla_put_u32(skb, WGDEVICE_A_REJECT_AFTER_TIME,
+-					wg->advanced_security_config.reject_after_time) ||
+-			    nla_put_u32(skb, WGDEVICE_A_KEEPALIVE_TIMEOUT,
+-					wg->advanced_security_config.keepalive_timeout) ||
+-			    nla_put_u32(skb, WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS,
+-					wg->advanced_security_config.max_handshake_attempts) ||
+-			    nla_put_u8(skb, WGDEVICE_A_RANDOM_TRAILERS,
+-				       wg->advanced_security_config.random_trailers) ||
+-			    nla_put_u8(skb, WGDEVICE_A_DISABLE_COOKIES,
+-				       wg->advanced_security_config.disable_cookies) ||
+-			    nla_put_s32(skb, WGDEVICE_A_CREATING_NET, creating_nsid))
+-				goto out;
++				config->junk_packet_max_size) ||
++		    nla_put_u16(skb, WGDEVICE_A_S1,
++				config->init_packet_junk_size) ||
++		    nla_put_u16(skb, WGDEVICE_A_S2,
++				config->response_packet_junk_size) ||
++		    nla_put_u16(skb, WGDEVICE_A_S3,
++				config->cookie_packet_junk_size) ||
++		    nla_put_u16(skb, WGDEVICE_A_S4,
++				config->transport_packet_junk_size) ||
++		    nla_put(skb, WGDEVICE_A_H1, sizeof(u64),
++			    &init_packet_magic_header) ||
++		    nla_put(skb, WGDEVICE_A_H2, sizeof(u64),
++			    &response_packet_magic_header) ||
++		    nla_put(skb, WGDEVICE_A_H3, sizeof(u64),
++			    &cookie_packet_magic_header) ||
++		    nla_put(skb, WGDEVICE_A_H4, sizeof(u64),
++			    &transport_packet_magic_header) ||
++		    (wg->junk_specs[0].desc &&
++		     nla_put_string(skb, WGDEVICE_A_I1,
++				    wg->junk_specs[0].desc)) ||
++		    (wg->junk_specs[1].desc &&
++		     nla_put_string(skb, WGDEVICE_A_I2,
++				    wg->junk_specs[1].desc)) ||
++		    (wg->junk_specs[2].desc &&
++		     nla_put_string(skb, WGDEVICE_A_I3,
++				    wg->junk_specs[2].desc)) ||
++		    (wg->junk_specs[3].desc &&
++		     nla_put_string(skb, WGDEVICE_A_I4,
++				    wg->junk_specs[3].desc)) ||
++		    (wg->junk_specs[4].desc &&
++		     nla_put_string(skb, WGDEVICE_A_I5,
++				    wg->junk_specs[4].desc)) ||
++		    nla_put_u32(skb, WGDEVICE_A_CONTENT_PADDING_ADDITION,
++				content_padding_addition) ||
++		    nla_put_u32(skb, WGDEVICE_A_REKEY_AFTER_TIME,
++				rekey_after_time) ||
++		    nla_put_u32(skb, WGDEVICE_A_REKEY_TIMEOUT, rekey_timeout) ||
++		    nla_put_u32(skb, WGDEVICE_A_REJECT_AFTER_TIME,
++				reject_after_time) ||
++		    nla_put_u32(skb, WGDEVICE_A_KEEPALIVE_TIMEOUT,
++				keepalive_timeout) ||
++		    nla_put_u32(skb, WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS,
++				max_handshake_attempts) ||
++		    nla_put_u8(skb, WGDEVICE_A_RANDOM_TRAILERS,
++			       config->random_trailers) ||
++		    nla_put_u8(skb, WGDEVICE_A_DISABLE_COOKIES,
++			       config->disable_cookies) ||
++		    nla_put_s32(skb, WGDEVICE_A_CREATING_NET, creating_nsid))
++			goto out;
+ 
+-		if (awg_header_protection_get_key(&wg->header_protection, key) &&
++		if (wg_header_protection_get_key(config, key) &&
+ 		    nla_put(skb, WGDEVICE_A_HEADER_PROTECTION_KEY,
+-			    HEADER_PROTECTION_KEY_SIZE, key))
++			    WG_HEADER_PROTECTION_KEY_SIZE, key))
+ 			goto out;
+ 
+ 		down_read(&wg->static_identity.lock);
+@@ -584,14 +645,20 @@ static int set_peer(struct wg_device *wg, struct nlattr **attrs)
+ 	}
+ 
+ 	if (attrs[WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL]) {
+-		const u16_range_t persistent_keepalive_interval = nla_get_u32(
+-				attrs[WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL]);
+-		const bool send_keepalive =
+-			u16_range_is_zero(peer->persistent_keepalive_interval) &&
+-			!u16_range_is_zero(persistent_keepalive_interval) &&
++		struct wg_u16_range keepalive;
++		bool send_keepalive;
++
++		ret = get_keepalive_range(attrs[WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL],
++					  &keepalive);
++		if (ret < 0)
++			goto out;
++
++		send_keepalive =
++			wg_u16_range_is_zero(peer->persistent_keepalive_interval) &&
++			!wg_u16_range_is_zero(keepalive) &&
+ 			netif_running(wg->dev);
+ 
+-		peer->persistent_keepalive_interval = persistent_keepalive_interval;
++		peer->persistent_keepalive_interval = keepalive;
+ 		if (send_keepalive)
+ 			wg_packet_send_keepalive(peer);
+ 	}
+@@ -609,14 +676,14 @@ out:
+ 
+ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ {
+-	const int ispec_attrs[] = {
++	const int junk_attrs[] = {
+ 		WGDEVICE_A_I1, WGDEVICE_A_I2, WGDEVICE_A_I3, WGDEVICE_A_I4,
+ 		WGDEVICE_A_I5,
+ 	};
+ 	struct wg_device *wg = lookup_interface(info->attrs, skb);
+-	struct amnezia_config *asc = kzalloc(sizeof(*asc), GFP_KERNEL);
+-	char *ispec_descs[ARRAY_SIZE(ispec_attrs)] = {};
+-	u32 flags = 0, ispec_mask = 0;
++	struct wg_obfuscation *cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
++	char *junk_descs[ARRAY_SIZE(junk_attrs)] = {};
++	u32 flags = 0, junk_mask = 0;
+ 	int ret, i;
+ 
+ 	if (IS_ERR(wg)) {
+@@ -626,11 +693,11 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 
+ 	rtnl_lock();
+ 	mutex_lock(&wg->device_update_lock);
+-	if (!asc) {
++	if (!cfg) {
+ 		ret = -ENOMEM;
+ 		goto out;
+ 	}
+-	*asc = wg->advanced_security_config;
++	*cfg = *wg_obfuscation_locked(wg);
+ 
+ 	if (info->attrs[WGDEVICE_A_FLAGS])
+ 		flags = nla_get_u32(info->attrs[WGDEVICE_A_FLAGS]);
+@@ -662,102 +729,103 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 			goto out;
+ 	}
+ 
+-	if (info->attrs[WGDEVICE_A_JC]) {
+-		asc->junk_packet_count = nla_get_u16(info->attrs[WGDEVICE_A_JC]);
+-	}
++	if (info->attrs[WGDEVICE_A_JC])
++		cfg->junk_packet_count = nla_get_u16(info->attrs[WGDEVICE_A_JC]);
+ 
+-	if (info->attrs[WGDEVICE_A_JMIN]) {
+-		asc->junk_packet_min_size = nla_get_u16(info->attrs[WGDEVICE_A_JMIN]);
+-	}
++	if (info->attrs[WGDEVICE_A_JMIN])
++		cfg->junk_packet_min_size = nla_get_u16(info->attrs[WGDEVICE_A_JMIN]);
+ 
+-	if (info->attrs[WGDEVICE_A_JMAX]) {
+-		asc->junk_packet_max_size = nla_get_u16(info->attrs[WGDEVICE_A_JMAX]);
+-	}
++	if (info->attrs[WGDEVICE_A_JMAX])
++		cfg->junk_packet_max_size = nla_get_u16(info->attrs[WGDEVICE_A_JMAX]);
+ 
+-	if (info->attrs[WGDEVICE_A_S1]) {
+-		asc->init_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S1]);
+-	}
++	if (info->attrs[WGDEVICE_A_S1])
++		cfg->init_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S1]);
+ 
+-	if (info->attrs[WGDEVICE_A_S2]) {
+-		asc->response_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S2]);
+-	}
++	if (info->attrs[WGDEVICE_A_S2])
++		cfg->response_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S2]);
+ 
+-	if (info->attrs[WGDEVICE_A_S3]) {
+-		asc->cookie_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S3]);
+-	}
++	if (info->attrs[WGDEVICE_A_S3])
++		cfg->cookie_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S3]);
+ 
+-	if (info->attrs[WGDEVICE_A_S4]) {
+-		asc->transport_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S4]);
+-	}
++	if (info->attrs[WGDEVICE_A_S4])
++		cfg->transport_packet_junk_size = nla_get_u16(info->attrs[WGDEVICE_A_S4]);
+ 
+ 	if (info->attrs[WGDEVICE_A_H1]) {
+-		asc->init_packet_magic_header =
+-			nla_get_u64(info->attrs[WGDEVICE_A_H1]);
++		cfg->init_packet_magic_header =
++			get_u32_range(info->attrs[WGDEVICE_A_H1]);
+ 	}
+ 
+ 	if (info->attrs[WGDEVICE_A_H2]) {
+-		asc->response_packet_magic_header =
+-			nla_get_u64(info->attrs[WGDEVICE_A_H2]);
++		cfg->response_packet_magic_header =
++			get_u32_range(info->attrs[WGDEVICE_A_H2]);
+ 	}
+ 
+ 	if (info->attrs[WGDEVICE_A_H3]) {
+-		asc->cookie_packet_magic_header =
+-			nla_get_u64(info->attrs[WGDEVICE_A_H3]);
++		cfg->cookie_packet_magic_header =
++			get_u32_range(info->attrs[WGDEVICE_A_H3]);
+ 	}
+ 
+ 	if (info->attrs[WGDEVICE_A_H4]) {
+-		asc->transport_packet_magic_header =
+-			nla_get_u64(info->attrs[WGDEVICE_A_H4]);
++		cfg->transport_packet_magic_header =
++			get_u32_range(info->attrs[WGDEVICE_A_H4]);
+ 	}
+ 
+-	if (info->attrs[WGDEVICE_A_CONTENT_PADDING_ADDITION])
+-		asc->content_padding_addition =
+-			nla_get_u32(info->attrs[WGDEVICE_A_CONTENT_PADDING_ADDITION]);
++	if (info->attrs[WGDEVICE_A_CONTENT_PADDING_ADDITION]) {
++		const struct nlattr *attr =
++			info->attrs[WGDEVICE_A_CONTENT_PADDING_ADDITION];
++
++		cfg->content_padding_addition =
++			get_u16_range(attr);
++	}
+ 
+ 	if (info->attrs[WGDEVICE_A_REKEY_AFTER_TIME])
+-		asc->rekey_after_time =
+-			nla_get_u32(info->attrs[WGDEVICE_A_REKEY_AFTER_TIME]);
++		cfg->rekey_after_time =
++			get_u16_range(info->attrs[WGDEVICE_A_REKEY_AFTER_TIME]);
+ 
+ 	if (info->attrs[WGDEVICE_A_REKEY_TIMEOUT])
+-		asc->rekey_timeout =
+-			nla_get_u32(info->attrs[WGDEVICE_A_REKEY_TIMEOUT]);
++		cfg->rekey_timeout =
++			get_u16_range(info->attrs[WGDEVICE_A_REKEY_TIMEOUT]);
+ 
+ 	if (info->attrs[WGDEVICE_A_REJECT_AFTER_TIME])
+-		asc->reject_after_time =
+-			nla_get_u32(info->attrs[WGDEVICE_A_REJECT_AFTER_TIME]);
++		cfg->reject_after_time =
++			get_u16_range(info->attrs[WGDEVICE_A_REJECT_AFTER_TIME]);
+ 
+ 	if (info->attrs[WGDEVICE_A_KEEPALIVE_TIMEOUT])
+-		asc->keepalive_timeout =
+-			nla_get_u32(info->attrs[WGDEVICE_A_KEEPALIVE_TIMEOUT]);
++		cfg->keepalive_timeout =
++			get_u16_range(info->attrs[WGDEVICE_A_KEEPALIVE_TIMEOUT]);
+ 
+-	if (info->attrs[WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS])
+-		asc->max_handshake_attempts =
+-			nla_get_u32(info->attrs[WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS]);
++	if (info->attrs[WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS]) {
++		const struct nlattr *attr =
++			info->attrs[WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS];
++
++		cfg->max_handshake_attempts =
++			get_u16_range(attr);
++	}
+ 
+ 	if (info->attrs[WGDEVICE_A_RANDOM_TRAILERS])
+-		asc->random_trailers =
++		cfg->random_trailers =
+ 			nla_get_u8(info->attrs[WGDEVICE_A_RANDOM_TRAILERS]);
+ 
+ 	if (info->attrs[WGDEVICE_A_DISABLE_COOKIES])
+-		asc->disable_cookies =
++		cfg->disable_cookies =
+ 			nla_get_u8(info->attrs[WGDEVICE_A_DISABLE_COOKIES]);
+ 
+ 	if (info->attrs[WGDEVICE_A_HEADER_PROTECTION_KEY]) {
+-		memcpy(asc->header_protection_key,
+-		       nla_data(info->attrs[WGDEVICE_A_HEADER_PROTECTION_KEY]),
+-		       HEADER_PROTECTION_KEY_SIZE);
+-		asc->has_header_protection_key = true;
++		const struct nlattr *attr =
++			info->attrs[WGDEVICE_A_HEADER_PROTECTION_KEY];
++
++		wg_header_protection_set_key(cfg, nla_data(attr));
+ 	}
+ 
+-	for (i = 0; i < ARRAY_SIZE(ispec_attrs); ++i) {
+-		if (!info->attrs[ispec_attrs[i]])
++	for (i = 0; i < ARRAY_SIZE(junk_attrs); ++i) {
++		if (!info->attrs[junk_attrs[i]])
+ 			continue;
+-		ispec_descs[i] = nla_strdup(info->attrs[ispec_attrs[i]], GFP_KERNEL);
+-		if (!ispec_descs[i]) {
++		junk_descs[i] = nla_strdup(info->attrs[junk_attrs[i]], GFP_KERNEL);
++		if (!junk_descs[i]) {
+ 			ret = -ENOMEM;
+ 			goto out;
+ 		}
+-		ispec_mask |= 1U << i;
++		junk_mask |= 1U << i;
+ 	}
+ 
+ 	if (flags & WGDEVICE_F_REPLACE_PEERS)
+@@ -803,8 +871,8 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 	}
+ skip_set_private_key:
+ 
+-	ret = wg_device_handle_post_config(wg->dev, asc, ispec_descs,
+-					   ispec_mask);
++	ret = wg_device_handle_post_config(wg->dev, cfg, junk_descs,
++					   junk_mask);
+ 	if (ret < 0)
+ 		goto out;
+ 
+@@ -829,9 +897,9 @@ out:
+ 	rtnl_unlock();
+ 	dev_put(wg->dev);
+ out_nodev:
+-	for (i = 0; i < ARRAY_SIZE(ispec_descs); ++i)
+-		kfree(ispec_descs[i]);
+-	kfree_sensitive(asc);
++	for (i = 0; i < ARRAY_SIZE(junk_descs); ++i)
++		kfree(junk_descs[i]);
++	kfree_sensitive(cfg);
+ 	if (info->attrs[WGDEVICE_A_PRIVATE_KEY])
+ 		memzero_explicit(nla_data(info->attrs[WGDEVICE_A_PRIVATE_KEY]),
+ 				 nla_len(info->attrs[WGDEVICE_A_PRIVATE_KEY]));
+diff --git a/drivers/net/wireguard/noise.c b/drivers/net/wireguard/noise.c
+index d54874d11cba..fd64d68f9f0b 100644
+--- a/drivers/net/wireguard/noise.c
++++ b/drivers/net/wireguard/noise.c
+@@ -17,6 +17,7 @@
+ #include <linux/bitmap.h>
+ #include <linux/scatterlist.h>
+ #include <linux/highmem.h>
++#include <linux/unaligned.h>
+ #include <crypto/utils.h>
+ 
+ /* This implements Noise_IKpsk2:
+@@ -654,7 +655,7 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
+ 		memcpy(handshake->latest_timestamp, t, NOISE_TIMESTAMP_LEN);
+ 	memcpy(handshake->hash, hash, NOISE_HASH_LEN);
+ 	memcpy(handshake->chaining_key, chaining_key, NOISE_HASH_LEN);
+-	handshake->remote_index = src->sender_index;
++	handshake->remote_index = get_unaligned(&src->sender_index);
+ 	initiation_consumption = ktime_get_coarse_boottime_ns();
+ 	if ((s64)(handshake->last_initiation_consumption - initiation_consumption) < 0)
+ 		handshake->last_initiation_consumption = initiation_consumption;
+@@ -756,7 +757,7 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
+ 
+ 	handshake = (struct noise_handshake *)wg_index_hashtable_lookup(
+ 		wg->index_hashtable, INDEX_HASHTABLE_HANDSHAKE,
+-		src->receiver_index, &peer);
++		get_unaligned(&src->receiver_index), &peer);
+ 	if (unlikely(!handshake))
+ 		goto out;
+ 
+@@ -804,7 +805,7 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
+ 	memcpy(handshake->remote_ephemeral, e, NOISE_PUBLIC_KEY_LEN);
+ 	memcpy(handshake->hash, hash, NOISE_HASH_LEN);
+ 	memcpy(handshake->chaining_key, chaining_key, NOISE_HASH_LEN);
+-	handshake->remote_index = src->sender_index;
++	handshake->remote_index = get_unaligned(&src->sender_index);
+ 	handshake->state = HANDSHAKE_CONSUMED_RESPONSE;
+ 	up_write(&handshake->lock);
+ 	ret_peer = peer;
+diff --git a/drivers/net/wireguard/peer.c b/drivers/net/wireguard/peer.c
+index f1d5165d42ae..d33e9e100854 100644
+--- a/drivers/net/wireguard/peer.c
++++ b/drivers/net/wireguard/peer.c
+@@ -36,7 +36,7 @@ struct wg_peer *wg_peer_create(struct wg_device *wg,
+ 	if (unlikely(dst_cache_init(&peer->endpoint_cache, GFP_KERNEL)))
+ 		goto err;
+ 
+-	WRITE_ONCE(peer->udp_window, DEFAULT_UDP_WINDOW);
++	WRITE_ONCE(peer->max_packet_size, DEFAULT_PEER_PACKET_SIZE);
+ 	peer->device = wg;
+ 	wg_noise_handshake_init(&peer->handshake, &wg->static_identity,
+ 				public_key, preshared_key, peer);
+diff --git a/drivers/net/wireguard/peer.h b/drivers/net/wireguard/peer.h
+index 5a415be8d83c..9f1909bf017d 100644
+--- a/drivers/net/wireguard/peer.h
++++ b/drivers/net/wireguard/peer.h
+@@ -57,7 +57,7 @@ struct wg_peer {
+ 	struct timer_list timer_persistent_keepalive;
+ 	unsigned int timer_handshake_attempts;
+ 	unsigned int max_handshake_attempts;
+-	u16_range_t persistent_keepalive_interval;
++	struct wg_u16_range persistent_keepalive_interval;
+ 	bool timer_need_another_keepalive;
+ 	bool sent_lastminute_handshake;
+ 	struct timespec64 walltime_last_handshake;
+@@ -67,8 +67,8 @@ struct wg_peer {
+ 	struct list_head allowedips_list;
+ 	struct napi_struct napi;
+ 	u64 internal_id;
+-	atomic_t jp_packet_counter;
+-	unsigned int udp_window;
++	atomic_t junk_counter;
++	unsigned int max_packet_size;
+ };
+ 
+ struct wg_peer *wg_peer_create(struct wg_device *wg,
+@@ -88,56 +88,55 @@ void wg_peer_remove_all(struct wg_device *wg);
+ int wg_peer_init(void);
+ void wg_peer_uninit(void);
+ 
+-static inline u16 wg_peer_rekey_timeout(struct wg_peer *peer)
++static inline u16 wg_rekey_timeout(const struct wg_obfuscation *cfg)
+ {
+-	return u16_range_lo_or(peer->device->advanced_security_config.rekey_timeout,
+-			       REKEY_TIMEOUT);
++	return wg_u16_range_lo_or(cfg->rekey_timeout, REKEY_TIMEOUT);
+ }
+ 
+-static inline unsigned int wg_peer_pick_max_handshake_attempts(struct wg_peer *peer)
++static inline unsigned int
++wg_pick_max_handshake_attempts(const struct wg_obfuscation *cfg)
+ {
+-	return u16_range_pick_or(peer->device->advanced_security_config.max_handshake_attempts,
+-				 MAX_TIMER_HANDSHAKES);
++	return wg_u16_range_pick_or(cfg->max_handshake_attempts,
++				    MAX_TIMER_HANDSHAKES);
+ }
+ 
+-static inline unsigned int wg_peer_udp_window(struct wg_peer *peer)
++static inline unsigned int wg_peer_max_packet_size(struct wg_peer *peer)
+ {
+-	return peer ? READ_ONCE(peer->udp_window) : DEFAULT_UDP_WINDOW;
++	return peer ? READ_ONCE(peer->max_packet_size) :
++		DEFAULT_PEER_PACKET_SIZE;
+ }
+ 
+-static inline void wg_peer_grow_udp_window(struct wg_peer *peer,
+-					   unsigned int size)
++static inline void wg_peer_update_max_packet_size(struct wg_peer *peer,
++						  unsigned int size)
+ {
+-	if (READ_ONCE(peer->udp_window) < size)
+-		WRITE_ONCE(peer->udp_window, size);
++	size = min_t(unsigned int, size, MESSAGE_MAX_SIZE);
++	if (READ_ONCE(peer->max_packet_size) < size)
++		WRITE_ONCE(peer->max_packet_size, size);
+ }
+ 
+-static inline unsigned int wg_peer_skb_random_trailer(struct wg_peer *peer,
+-						      struct wg_device *wg,
++static inline unsigned int wg_peer_random_trailer_len(struct wg_peer *peer,
+ 						      unsigned int size)
+ {
+-	unsigned int window = wg_peer_udp_window(peer);
++	unsigned int max_size = wg_peer_max_packet_size(peer);
+ 
+-	return wg->advanced_security_config.random_trailers && window > size ?
+-		get_random_u32_below(window - size) : 0;
++	return max_size > size ? get_random_u32_below(max_size - size) : 0;
+ }
+ 
+-static inline unsigned int wg_peer_skb_padding_addition(struct wg_peer *peer,
+-							struct wg_device *wg,
++static inline unsigned int wg_peer_padding_addition_len(struct wg_peer *peer,
++							struct wg_u16_range addition,
+ 							unsigned int size)
+ {
+-	unsigned int window = wg_peer_udp_window(peer);
++	unsigned int max_size = wg_peer_max_packet_size(peer);
+ 
+-	if (window < size)
++	if (max_size < size)
+ 		return 0;
+ 
+-	return min(u16_range_pick_one(wg->advanced_security_config.content_padding_addition),
+-		   window - size);
++	return min(wg_u16_range_pick_one(addition), max_size - size);
+ }
+ 
+ static inline void wg_peer_reset_last_sent_handshake(struct wg_peer *peer)
+ {
+-	u16 timeout = wg_peer_rekey_timeout(peer);
++	u16 timeout = wg_rekey_timeout(wg_obfuscation_locked(peer->device));
+ 
+ 	atomic64_set(&peer->last_sent_handshake,
+ 		     ktime_get_coarse_boottime_ns() -
+diff --git a/drivers/net/wireguard/range.h b/drivers/net/wireguard/range.h
+new file mode 100644
+index 000000000000..eadedddb70d3
+--- /dev/null
++++ b/drivers/net/wireguard/range.h
+@@ -0,0 +1,141 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _WG_RANGE_H
++#define _WG_RANGE_H
++
++#include <linux/random.h>
++#include <linux/types.h>
++
++struct wg_u32_range {
++	u64 packed;
++};
++
++static inline struct wg_u32_range wg_u32_range_from_packed(u64 packed)
++{
++	return (struct wg_u32_range){ .packed = packed };
++}
++
++static inline u64 wg_u32_range_packed(struct wg_u32_range range)
++{
++	return range.packed;
++}
++
++static inline void wg_u32_range_init(struct wg_u32_range *range, u32 lo,
++				     u32 hi)
++{
++	range->packed = (u64)hi << 32 | (u64)lo;
++}
++
++static inline u32 wg_u32_range_lo(struct wg_u32_range range)
++{
++	return (u32)range.packed;
++}
++
++static inline u32 wg_u32_range_hi(struct wg_u32_range range)
++{
++	return (u32)(range.packed >> 32);
++}
++
++static inline bool wg_u32_range_contains(struct wg_u32_range range, u32 val)
++{
++	return wg_u32_range_lo(range) <= val && val <= wg_u32_range_hi(range);
++}
++
++static inline bool wg_u32_range_is_zero(struct wg_u32_range range)
++{
++	return range.packed == 0;
++}
++
++static inline bool wg_u32_range_is_valid(struct wg_u32_range range)
++{
++	return wg_u32_range_lo(range) <= wg_u32_range_hi(range);
++}
++
++static inline bool wg_u32_range_overlap(struct wg_u32_range left,
++					struct wg_u32_range right)
++{
++	return wg_u32_range_lo(left) <= wg_u32_range_hi(right) &&
++	       wg_u32_range_lo(right) <= wg_u32_range_hi(left);
++}
++
++static inline u32 wg_u32_range_pick_one(struct wg_u32_range range)
++{
++	return get_random_u32_inclusive(wg_u32_range_lo(range),
++					wg_u32_range_hi(range));
++}
++
++struct wg_u16_range {
++	u32 packed;
++};
++
++static inline struct wg_u16_range wg_u16_range_from_packed(u32 packed)
++{
++	return (struct wg_u16_range){ .packed = packed };
++}
++
++static inline u32 wg_u16_range_packed(struct wg_u16_range range)
++{
++	return range.packed;
++}
++
++static inline void wg_u16_range_init(struct wg_u16_range *range, u16 lo,
++				     u16 hi)
++{
++	range->packed = (u32)hi << 16 | (u32)lo;
++}
++
++static inline u16 wg_u16_range_lo(struct wg_u16_range range)
++{
++	return (u16)range.packed;
++}
++
++static inline u16 wg_u16_range_hi(struct wg_u16_range range)
++{
++	return (u16)(range.packed >> 16);
++}
++
++static inline bool wg_u16_range_contains(struct wg_u16_range range, u16 val)
++{
++	return wg_u16_range_lo(range) <= val && val <= wg_u16_range_hi(range);
++}
++
++static inline bool wg_u16_range_is_zero(struct wg_u16_range range)
++{
++	return range.packed == 0;
++}
++
++static inline bool wg_u16_range_is_valid(struct wg_u16_range range)
++{
++	return wg_u16_range_lo(range) <= wg_u16_range_hi(range);
++}
++
++static inline bool wg_u16_range_overlap(struct wg_u16_range left,
++					struct wg_u16_range right)
++{
++	return wg_u16_range_lo(left) <= wg_u16_range_hi(right) &&
++	       wg_u16_range_lo(right) <= wg_u16_range_hi(left);
++}
++
++static inline u16 wg_u16_range_pick_one(struct wg_u16_range range)
++{
++	return get_random_u32_inclusive(wg_u16_range_lo(range),
++					wg_u16_range_hi(range));
++}
++
++static inline u16 wg_u16_range_pick_or(struct wg_u16_range range,
++				       u16 fallback)
++{
++	return wg_u16_range_is_zero(range) ? fallback :
++		wg_u16_range_pick_one(range);
++}
++
++static inline u16 wg_u16_range_lo_or(struct wg_u16_range range, u16 fallback)
++{
++	return wg_u16_range_is_zero(range) ? fallback : wg_u16_range_lo(range);
++}
++
++static inline u16 wg_u16_range_hi_or(struct wg_u16_range range, u16 fallback)
++{
++	return wg_u16_range_is_zero(range) ? fallback : wg_u16_range_hi(range);
++}
++
++#endif /* _WG_RANGE_H */
+diff --git a/drivers/net/wireguard/receive.c b/drivers/net/wireguard/receive.c
+index 50f5c1bdb687..f8a876408590 100644
+--- a/drivers/net/wireguard/receive.c
++++ b/drivers/net/wireguard/receive.c
+@@ -28,58 +28,53 @@ static void update_rx_stats(struct wg_peer *peer, size_t transport_len,
+ 	peer->rx_packets += !!inner_len;
+ }
+ 
+-static bool awg_header_matches(struct sk_buff *skb, u16 padding,
+-			       size_t body_len, bool exact_len,
+-			       u32_range_t range, u32 mask)
++static bool header_matches(struct sk_buff *skb, u16 padding, size_t body_len,
++			   bool exact_len, struct wg_u32_range range, u32 mask)
+ {
+ 	unsigned int expected_len = padding + body_len;
+-	struct message_header *header;
+-	u8 buf[sizeof(*header)];
++	u8 buf[sizeof(struct message_header)];
++	u8 *header;
+ 
+ 	if (exact_len ? skb->len != expected_len : skb->len < expected_len)
+ 		return false;
+ 	header = skb_header_pointer(skb, padding, sizeof(buf), buf);
+ 	if (unlikely(!header))
+ 		return false;
+-	return u32_range_contains(range, le32_to_cpu(header->type) ^ mask);
++	return wg_u32_range_contains(range, get_unaligned_le32(header) ^ mask);
+ }
+ 
+-static size_t awg_determine_type_and_padding(struct sk_buff *skb,
+-					     struct wg_device *wg, u32 mask,
+-					     u32 *type, u16 *padding)
++static size_t determine_type_and_padding(struct sk_buff *skb,
++					 struct wg_device *wg,
++					 const struct wg_obfuscation *cfg,
++					 u32 mask, u32 *type, u16 *padding)
+ {
+-	struct amnezia_config *asc = &wg->advanced_security_config;
+-	bool exact = !asc->random_trailers;
++	bool exact = !cfg->random_trailers;
+ 
+-	if (awg_header_matches(skb, asc->init_packet_junk_size,
+-			       MESSAGE_INITIATION_SIZE, exact,
+-			       asc->init_packet_magic_header, mask)) {
++	if (header_matches(skb, cfg->init_packet_junk_size, MESSAGE_INITIATION_SIZE,
++			   exact, cfg->init_packet_magic_header, mask)) {
+ 		*type = MESSAGE_HANDSHAKE_INITIATION;
+-		*padding = asc->init_packet_junk_size;
++		*padding = cfg->init_packet_junk_size;
+ 		return MESSAGE_INITIATION_SIZE;
+ 	}
+ 
+-	if (awg_header_matches(skb, asc->response_packet_junk_size,
+-			       MESSAGE_RESPONSE_SIZE, exact,
+-			       asc->response_packet_magic_header, mask)) {
++	if (header_matches(skb, cfg->response_packet_junk_size, MESSAGE_RESPONSE_SIZE,
++			   exact, cfg->response_packet_magic_header, mask)) {
+ 		*type = MESSAGE_HANDSHAKE_RESPONSE;
+-		*padding = asc->response_packet_junk_size;
++		*padding = cfg->response_packet_junk_size;
+ 		return MESSAGE_RESPONSE_SIZE;
+ 	}
+ 
+-	if (awg_header_matches(skb, asc->cookie_packet_junk_size,
+-			       MESSAGE_COOKIE_REPLY_SIZE, exact,
+-			       asc->cookie_packet_magic_header, mask)) {
++	if (header_matches(skb, cfg->cookie_packet_junk_size, MESSAGE_COOKIE_REPLY_SIZE,
++			   exact, cfg->cookie_packet_magic_header, mask)) {
+ 		*type = MESSAGE_HANDSHAKE_COOKIE;
+-		*padding = asc->cookie_packet_junk_size;
++		*padding = cfg->cookie_packet_junk_size;
+ 		return MESSAGE_COOKIE_REPLY_SIZE;
+ 	}
+ 
+-	if (awg_header_matches(skb, asc->transport_packet_junk_size,
+-			       MESSAGE_MINIMUM_LENGTH, false,
+-			       asc->transport_packet_magic_header, mask)) {
++	if (header_matches(skb, cfg->transport_packet_junk_size, MESSAGE_MINIMUM_LENGTH,
++			   false, cfg->transport_packet_magic_header, mask)) {
+ 		*type = MESSAGE_DATA;
+-		*padding = asc->transport_packet_junk_size;
++		*padding = cfg->transport_packet_junk_size;
+ 		return MESSAGE_TRANSPORT_SIZE;
+ 	}
+ 
+@@ -90,13 +85,14 @@ static size_t awg_determine_type_and_padding(struct sk_buff *skb,
+ 	return 0;
+ }
+ 
+-static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
++static int __prepare_skb_header(struct sk_buff *skb, struct wg_device *wg,
++				const struct wg_obfuscation *cfg)
+ {
+ 	size_t data_offset, data_len, header_len;
+ 	struct chacha_state state;
+ 	struct udphdr *udp;
+-	u8 hash[4] = { 0 }, *nonce, buf[HEADER_PROTECTION_NONCE_SIZE];
+-	bool protected = false;
++	u8 hash[4] = { 0 }, *nonce, buf[WG_HEADER_PROTECTION_NONCE_SIZE];
++	bool header_protected = false;
+ 	u32 mask = 0, type;
+ 	u16 padding;
+ 
+@@ -130,21 +126,22 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
+ 	if (unlikely(skb->len != data_len))
+ 		/* Final len does not agree with calculated len */
+ 		return -EINVAL;
+-	if (wg->header_protection.has_protection) {
++	if (cfg->has_header_protection_key) {
+ 		nonce = skb_header_pointer(skb, 0, sizeof(buf), buf);
+ 		if (unlikely(!nonce))
+ 			return -EINVAL;
+ 
+-		protected = awg_header_protection_init(&state, wg, nonce);
+-		if (protected) {
++		header_protected =
++			wg_header_protection_init_state(&state, cfg, nonce);
++		if (header_protected) {
+ 			chacha20_crypt(&state, hash, hash, sizeof(hash));
+ 			state.x[12] = 0;
+ 			mask = get_unaligned_le32(hash);
+ 		}
+ 	}
+ 
+-	header_len = awg_determine_type_and_padding(skb, wg, mask, &type,
+-						    &padding);
++	header_len = determine_type_and_padding(skb, wg, cfg, mask, &type,
++						&padding);
+ 	if (unlikely(!header_len))
+ 		return -EINVAL;
+ 
+@@ -160,12 +157,23 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
+ 		return -EINVAL;
+ 	__skb_pull(skb, data_offset + padding);
+ 
+-	if (protected)
++	if (header_protected)
+ 		chacha20_crypt(&state, skb->data, skb->data, header_len);
+ 
+ 	return 0;
+ }
+ 
++static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
++{
++	int ret;
++
++	rcu_read_lock();
++	ret = __prepare_skb_header(skb, wg,
++				   rcu_dereference(wg->obfuscation));
++	rcu_read_unlock();
++	return ret;
++}
++
+ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 					struct sk_buff *skb)
+ {
+@@ -176,6 +184,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 	 */
+ 	static u64 last_under_load;
+ 	bool packet_needs_cookie;
++	bool disable_cookies;
+ 	bool under_load;
+ 
+ 	if (PACKET_CB(skb)->type == MESSAGE_HANDSHAKE_COOKIE) {
+@@ -186,15 +195,21 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 		return;
+ 	}
+ 
+-	under_load = !wg->advanced_security_config.disable_cookies &&
+-		atomic_read(&wg->handshake_queue_len) >=
+-			MAX_QUEUED_INCOMING_HANDSHAKES / 8;
+-	if (under_load) {
+-		last_under_load = ktime_get_coarse_boottime_ns();
+-	} else if (last_under_load) {
+-		under_load = !wg_birthdate_has_expired(last_under_load, 1);
+-		if (!under_load)
+-			last_under_load = 0;
++	rcu_read_lock();
++	disable_cookies = rcu_dereference(wg->obfuscation)->disable_cookies;
++	rcu_read_unlock();
++
++	under_load = false;
++	if (!disable_cookies) {
++		under_load = atomic_read(&wg->handshake_queue_len) >=
++			     MAX_QUEUED_INCOMING_HANDSHAKES / 8;
++		if (under_load) {
++			last_under_load = ktime_get_coarse_boottime_ns();
++		} else if (last_under_load) {
++			under_load = !wg_birthdate_has_expired(last_under_load, 1);
++			if (!under_load)
++				last_under_load = 0;
++		}
+ 	}
+ 	mac_state = wg_cookie_validate_packet(&wg->cookie_checker, skb,
+ 					      under_load);
+@@ -216,7 +231,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 
+ 		if (packet_needs_cookie) {
+ 			wg_packet_send_handshake_cookie(wg, skb,
+-							message->sender_index);
++				get_unaligned(&message->sender_index));
+ 			return;
+ 		}
+ 		peer = wg_noise_handshake_consume_initiation(message, wg, skb);
+@@ -238,7 +253,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 
+ 		if (packet_needs_cookie) {
+ 			wg_packet_send_handshake_cookie(wg, skb,
+-							message->sender_index);
++				get_unaligned(&message->sender_index));
+ 			return;
+ 		}
+ 		peer = wg_noise_handshake_consume_response(message, wg);
+@@ -295,13 +310,15 @@ void wg_packet_handshake_receive_worker(struct work_struct *work)
+ 	}
+ }
+ 
+-static unsigned int key_fresh_timeout(struct wg_peer *peer)
++static unsigned int key_fresh_timeout(const struct wg_obfuscation *cfg)
+ {
+-	struct amnezia_config *asc = &peer->device->advanced_security_config;
++	int timeout = wg_u16_range_lo_or(cfg->reject_after_time,
++					 REJECT_AFTER_TIME) -
++		      wg_u16_range_lo_or(cfg->keepalive_timeout,
++					 KEEPALIVE_TIMEOUT) -
++		      wg_u16_range_lo_or(cfg->rekey_timeout, REKEY_TIMEOUT);
+ 
+-	return u16_range_pick_or(asc->reject_after_time, REJECT_AFTER_TIME) -
+-	       u16_range_lo_or(asc->keepalive_timeout, KEEPALIVE_TIMEOUT) -
+-	       u16_range_lo_or(asc->rekey_timeout, REKEY_TIMEOUT);
++	return max_t(int, timeout, REKEY_TIMEOUT);
+ }
+ 
+ static void keep_key_fresh(struct wg_peer *peer)
+@@ -317,7 +334,7 @@ static void keep_key_fresh(struct wg_peer *peer)
+ 	send = keypair && READ_ONCE(keypair->sending.is_valid) &&
+ 	       keypair->i_am_the_initiator &&
+ 	       wg_birthdate_has_expired(keypair->sending.birthdate,
+-			key_fresh_timeout(peer));
++			key_fresh_timeout(rcu_dereference_bh(peer->device->obfuscation)));
+ 	rcu_read_unlock_bh();
+ 
+ 	if (unlikely(send)) {
+@@ -328,6 +345,7 @@ static void keep_key_fresh(struct wg_peer *peer)
+ 
+ static bool decrypt_packet(struct sk_buff *skb, struct noise_keypair *keypair)
+ {
++	struct message_data *data = (struct message_data *)skb->data;
+ 	struct scatterlist sg[MAX_SKB_FRAGS + 8];
+ 	struct sk_buff *trailer;
+ 	unsigned int offset;
+@@ -343,8 +361,7 @@ static bool decrypt_packet(struct sk_buff *skb, struct noise_keypair *keypair)
+ 		return false;
+ 	}
+ 
+-	PACKET_CB(skb)->nonce =
+-		le64_to_cpu(((struct message_data *)skb->data)->counter);
++	PACKET_CB(skb)->nonce = get_unaligned_le64(&data->counter);
+ 
+ 	/* We ensure that the network header is part of the packet before we
+ 	 * call skb_cow_data, so that there's no chance that data is removed
+@@ -558,9 +575,9 @@ int wg_packet_rx_poll(struct napi_struct *napi, int budget)
+ 		if (unlikely(wg_socket_endpoint_from_skb(&endpoint, skb)))
+ 			goto next;
+ 
+-		wg_peer_grow_udp_window(peer, PACKET_CB(skb)->padding +
+-					      MESSAGE_MINIMUM_LENGTH +
+-					      skb->len);
++		wg_peer_update_max_packet_size(peer, PACKET_CB(skb)->padding +
++						     MESSAGE_MINIMUM_LENGTH +
++						     skb->len);
+ 
+ 		wg_reset_packet(skb, false);
+ 		wg_packet_consume_data_done(peer, skb, &endpoint);
+@@ -600,7 +617,8 @@ void wg_packet_decrypt_worker(struct work_struct *work)
+ 
+ static void wg_packet_consume_data(struct wg_device *wg, struct sk_buff *skb)
+ {
+-	__le32 idx = ((struct message_data *)skb->data)->key_idx;
++	struct message_data *data = (struct message_data *)skb->data;
++	__le32 idx = get_unaligned(&data->key_idx);
+ 	struct wg_peer *peer = NULL;
+ 	int ret;
+ 
+diff --git a/drivers/net/wireguard/send.c b/drivers/net/wireguard/send.c
+index 3cffbaeaaed7..895ec3f376bf 100644
+--- a/drivers/net/wireguard/send.c
++++ b/drivers/net/wireguard/send.c
+@@ -20,60 +20,58 @@
+ #include <net/udp.h>
+ #include <net/sock.h>
+ 
+-static u32 wg_get_random_u32_inclusive(u32 floor, u32 ceil)
+-{
+-	u32 diff = ceil - floor + 1;
+-	return floor + (get_random_u32() % diff);
+-}
+-
+ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+ {
+ 	struct message_handshake_initiation packet;
+ 	struct wg_device *wg = peer->device;
+-	struct jp_spec *spec;
++	struct wg_obfuscation cfg;
++	struct wg_junk_spec *spec;
++	u32 init_packet_magic_header;
+ 	void *buffer;
+ 	u8 ds;
+ 	u16 junk_packet_count, junk_packet_size;
+ 	int i;
+ 
+-	u32 init_packet_magic_header =
+-		u32_range_pick_one(wg->advanced_security_config.init_packet_magic_header);
++	wg_obfuscation_snapshot(wg, &cfg);
++	init_packet_magic_header =
++		wg_u32_range_pick_one(cfg.init_packet_magic_header);
+ 
+ 	if (!wg_birthdate_has_expired(atomic64_read(&peer->last_sent_handshake),
+-				      wg_peer_rekey_timeout(peer)))
+-		return; /* This function is rate limited. */
++				      wg_rekey_timeout(&cfg)))
++		goto out; /* This function is rate limited. */
+ 
+ 	atomic64_set(&peer->last_sent_handshake, ktime_get_coarse_boottime_ns());
+ 	net_dbg_ratelimited("%s: Sending handshake initiation to peer %llu (%pISpfsc)\n",
+ 			    peer->device->dev->name, peer->internal_id,
+ 			    &peer->endpoint.addr);
+ 
+-	atomic_set(&peer->jp_packet_counter, get_random_u32());
+-	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
+-		spec = &wg->ispecs[i];
+-		if (spec->pkt_size > 0) {
+-			mutex_lock(&spec->lock);
+-			jp_spec_applymods(spec, peer);
+-			wg_socket_send_buffer_to_peer(peer, spec->pkt,
+-						      spec->pkt_size, 0, 0,
++	atomic_set(&peer->junk_counter, get_random_u32());
++	for (i = 0; i < ARRAY_SIZE(wg->junk_specs); ++i) {
++		spec = &wg->junk_specs[i];
++		mutex_lock(&spec->lock);
++		if (spec->pkt_len > 0) {
++			wg_junk_spec_apply_mods(spec, peer);
++			wg_socket_send_buffer_to_peer(peer, &cfg, spec->pkt,
++						      spec->pkt_len, 0, 0,
+ 						      false);
+-			atomic_inc(&peer->jp_packet_counter);
+-			mutex_unlock(&spec->lock);
++			atomic_inc(&peer->junk_counter);
+ 		}
++		mutex_unlock(&spec->lock);
+ 	}
+ 
+-	junk_packet_count = wg->advanced_security_config.junk_packet_count;
+-	if (junk_packet_count) {
+-		buffer = kzalloc(wg->advanced_security_config.junk_packet_max_size, GFP_KERNEL);
++	junk_packet_count = cfg.junk_packet_count;
++	if (junk_packet_count && cfg.junk_packet_max_size) {
++		u16 jmin = cfg.junk_packet_min_size;
++		u16 jmax = cfg.junk_packet_max_size;
+ 
+-		while (junk_packet_count-- > 0) {
+-			junk_packet_size = (u16) wg_get_random_u32_inclusive(
+-					wg->advanced_security_config.junk_packet_min_size,
+-					wg->advanced_security_config.junk_packet_max_size);
++		buffer = kzalloc(jmax, GFP_KERNEL);
++
++		while (buffer && junk_packet_count-- > 0) {
++			junk_packet_size = get_random_u32_inclusive(jmin, jmax);
+ 
+ 			get_random_bytes(buffer, junk_packet_size);
+ 			get_random_bytes(&ds, 1);
+-			wg_socket_send_buffer_to_peer(peer, buffer,
++			wg_socket_send_buffer_to_peer(peer, &cfg, buffer,
+ 						      junk_packet_size, ds, 0,
+ 						      false);
+ 		}
+@@ -81,9 +79,6 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+ 		kfree(buffer);
+ 	}
+ 
+-	net_dbg_ratelimited("%s: Initiation magic header: %u\n",
+-	                    peer->device->dev->name, init_packet_magic_header);
+-
+ 	if (wg_noise_handshake_create_initiation(&packet, &peer->handshake, init_packet_magic_header)) {
+ 		wg_cookie_add_mac_to_packet(&packet, sizeof(packet), peer);
+ 		wg_timers_any_authenticated_packet_traversal(peer);
+@@ -91,12 +86,14 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+ 		atomic64_set(&peer->last_sent_handshake,
+ 			     ktime_get_coarse_boottime_ns());
+ 
+-		wg_socket_send_buffer_to_peer(peer, &packet, sizeof(packet),
++		wg_socket_send_buffer_to_peer(peer, &cfg, &packet, sizeof(packet),
+ 					      HANDSHAKE_DSCP,
+-					      wg->advanced_security_config.init_packet_junk_size,
+-					      true);
++					      cfg.init_packet_junk_size,
++					      cfg.random_trailers);
+ 		wg_timers_handshake_initiated(peer);
+ 	}
++out:
++	memzero_explicit(&cfg, sizeof(cfg));
+ }
+ 
+ void wg_packet_handshake_send_worker(struct work_struct *work)
+@@ -111,19 +108,26 @@ void wg_packet_handshake_send_worker(struct work_struct *work)
+ void wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
+ 						bool is_retry)
+ {
++	const struct wg_obfuscation *cfg;
++	u16 rekey_timeout;
++
+ 	if (!is_retry) {
+ 		peer->timer_handshake_attempts = 0;
+-		peer->max_handshake_attempts =
+-			wg_peer_pick_max_handshake_attempts(peer);
++		rcu_read_lock();
++		cfg = rcu_dereference(peer->device->obfuscation);
++		peer->max_handshake_attempts = wg_pick_max_handshake_attempts(cfg);
++		rcu_read_unlock();
+ 	}
+ 
+ 	rcu_read_lock_bh();
++	cfg = rcu_dereference_bh(peer->device->obfuscation);
++	rekey_timeout = wg_rekey_timeout(cfg);
+ 	/* We check last_sent_handshake here in addition to the actual function
+ 	 * we're queueing up, so that we don't queue things if not strictly
+ 	 * necessary:
+ 	 */
+ 	if (!wg_birthdate_has_expired(atomic64_read(&peer->last_sent_handshake),
+-				      wg_peer_rekey_timeout(peer)) ||
++				      rekey_timeout) ||
+ 			unlikely(READ_ONCE(peer->is_dead)))
+ 		goto out;
+ 
+@@ -145,14 +149,18 @@ void wg_packet_send_handshake_response(struct wg_peer *peer)
+ {
+ 	struct message_handshake_response packet;
+ 	struct wg_device *wg = peer->device;
++	struct wg_obfuscation cfg;
++	u32 type;
++
++	wg_obfuscation_snapshot(wg, &cfg);
++	type = wg_u32_range_pick_one(cfg.response_packet_magic_header);
+ 
+ 	atomic64_set(&peer->last_sent_handshake, ktime_get_coarse_boottime_ns());
+ 	net_dbg_ratelimited("%s: Sending handshake response to peer %llu (%pISpfsc)\n",
+ 			    peer->device->dev->name, peer->internal_id,
+ 			    &peer->endpoint.addr);
+ 
+-	if (wg_noise_handshake_create_response(&packet, &peer->handshake,
+-			u32_range_pick_one(wg->advanced_security_config.response_packet_magic_header))) {
++	if (wg_noise_handshake_create_response(&packet, &peer->handshake, type)) {
+ 		wg_cookie_add_mac_to_packet(&packet, sizeof(packet), peer);
+ 		if (wg_noise_handshake_begin_session(&peer->handshake,
+ 						     &peer->keypairs)) {
+@@ -161,13 +169,14 @@ void wg_packet_send_handshake_response(struct wg_peer *peer)
+ 			wg_timers_any_authenticated_packet_sent(peer);
+ 			atomic64_set(&peer->last_sent_handshake,
+ 				     ktime_get_coarse_boottime_ns());
+-			wg_socket_send_buffer_to_peer(peer, &packet,
++			wg_socket_send_buffer_to_peer(peer, &cfg, &packet,
+ 						      sizeof(packet),
+ 						      HANDSHAKE_DSCP,
+-						      wg->advanced_security_config.response_packet_junk_size,
+-						      true);
++						      cfg.response_packet_junk_size,
++						      cfg.random_trailers);
+ 		}
+ 	}
++	memzero_explicit(&cfg, sizeof(cfg));
+ }
+ 
+ void wg_packet_send_handshake_cookie(struct wg_device *wg,
+@@ -175,32 +184,41 @@ void wg_packet_send_handshake_cookie(struct wg_device *wg,
+ 				     __le32 sender_index)
+ {
+ 	struct message_handshake_cookie packet;
++	struct wg_obfuscation cfg;
++	u32 type;
++
++	wg_obfuscation_snapshot(wg, &cfg);
++	type = wg_u32_range_pick_one(cfg.cookie_packet_magic_header);
+ 
+ 	net_dbg_skb_ratelimited("%s: Sending cookie response for denied handshake message for %pISpfsc\n",
+ 				wg->dev->name, initiating_skb);
+ 
+ 	wg_cookie_message_create(&packet, initiating_skb, sender_index,
+-				 &wg->cookie_checker,
+-				 u32_range_pick_one(wg->advanced_security_config.cookie_packet_magic_header));
+-	wg_socket_send_buffer_as_reply_to_skb(wg, initiating_skb, &packet,
++				 &wg->cookie_checker, type);
++	wg_socket_send_buffer_as_reply_to_skb(wg, &cfg, initiating_skb, &packet,
+ 					      sizeof(packet),
+-					      wg->advanced_security_config.cookie_packet_junk_size);
++					      cfg.cookie_packet_junk_size,
++					      cfg.random_trailers);
++	memzero_explicit(&cfg, sizeof(cfg));
+ }
+ 
+ static void keep_key_fresh(struct wg_peer *peer)
+ {
+-	struct amnezia_config *asc = &peer->device->advanced_security_config;
++	const struct wg_obfuscation *cfg;
+ 	struct noise_keypair *keypair;
++	u16 rekey_after_time;
+ 	bool send;
+ 
+ 	rcu_read_lock_bh();
++	cfg = rcu_dereference_bh(peer->device->obfuscation);
++	rekey_after_time = wg_u16_range_pick_or(cfg->rekey_after_time,
++						REKEY_AFTER_TIME);
+ 	keypair = rcu_dereference_bh(peer->keypairs.current_keypair);
+ 	send = keypair && READ_ONCE(keypair->sending.is_valid) &&
+ 	       (atomic64_read(&keypair->sending_counter) > REKEY_AFTER_MESSAGES ||
+ 		(keypair->i_am_the_initiator &&
+ 		 wg_birthdate_has_expired(keypair->sending.birthdate,
+-					  u16_range_pick_or(asc->rekey_after_time,
+-							    REKEY_AFTER_TIME))));
++					  rekey_after_time)));
+ 	rcu_read_unlock_bh();
+ 
+ 	if (unlikely(send))
+@@ -228,11 +246,11 @@ static unsigned int calculate_skb_padding(struct sk_buff *skb)
+ 	return padded_size - last_unit;
+ }
+ 
+-static bool encrypt_packet(u32 message_type, u16 junk_size,
+-			   struct sk_buff *skb, struct noise_keypair *keypair)
++static bool encrypt_packet(const struct wg_obfuscation *cfg, u32 message_type,
++			   u16 junk_size, struct sk_buff *skb,
++			   struct noise_keypair *keypair)
+ {
+ 	struct wg_peer *peer = keypair->entry.peer;
+-	struct amnezia_config *asc = &peer->device->advanced_security_config;
+ 	unsigned int padding_len, plaintext_len, trailer_len, packet_len;
+ 	struct scatterlist sg[MAX_SKB_FRAGS + 8];
+ 	struct chacha_state state;
+@@ -249,14 +267,14 @@ static bool encrypt_packet(u32 message_type, u16 junk_size,
+ 	/* Calculate lengths. */
+ 	PACKET_CB(skb)->inner_len = skb->len;
+ 	packet_len = skb->len + MESSAGE_MINIMUM_LENGTH + junk_size;
+-	wg_peer_grow_udp_window(peer, packet_len);
++	wg_peer_update_max_packet_size(peer, packet_len);
+ 
+-	if (!u16_range_is_zero(asc->content_padding_addition))
+-		padding_len = wg_peer_skb_padding_addition(peer, peer->device,
++	if (!wg_u16_range_is_zero(cfg->content_padding_addition))
++		padding_len = wg_peer_padding_addition_len(peer,
++							   cfg->content_padding_addition,
+ 							   packet_len);
+-	else if (asc->random_trailers)
+-		padding_len = wg_peer_skb_random_trailer(peer, peer->device,
+-							 packet_len);
++	else if (cfg->random_trailers)
++		padding_len = wg_peer_random_trailer_len(peer, packet_len);
+ 	else
+ 		padding_len = calculate_skb_padding(skb);
+ 	trailer_len = padding_len + noise_encrypted_len(0);
+@@ -296,7 +314,7 @@ static bool encrypt_packet(u32 message_type, u16 junk_size,
+ 	pad = skb_push(skb, junk_size);
+ 	get_random_bytes(pad, junk_size);
+ 
+-	if (awg_header_protection_init(&state, peer->device, pad))
++	if (wg_header_protection_init_state(&state, cfg, pad))
+ 		chacha20_crypt(&state, (u8 *)header, (u8 *)header,
+ 			       sizeof(*header));
+ 
+@@ -383,26 +401,31 @@ void wg_packet_encrypt_worker(struct work_struct *work)
+ 	struct crypt_queue *queue = container_of(work, struct multicore_worker,
+ 						 work)->ptr;
+ 	struct sk_buff *first, *skb, *next;
+-	struct wg_peer *peer;
+-	struct wg_device *wg;
++	struct noise_keypair *keypair;
++	struct wg_obfuscation cfg;
++	u16 junk_size;
+ 
+ 	while ((first = ptr_ring_consume_bh(&queue->ring)) != NULL) {
+ 		enum packet_state state = PACKET_STATE_CRYPTED;
+ 
++		/* One list is one peer, so one configuration covers it. */
++		keypair = PACKET_CB(first)->keypair;
++		wg_obfuscation_snapshot(keypair->entry.peer->device, &cfg);
++		junk_size = cfg.transport_packet_junk_size;
++
+ 		skb_list_walk_safe(first, skb, next) {
+-			peer = PACKET_PEER(first);
+-			wg = peer->device;
+-			if (likely(encrypt_packet(
+-					  u32_range_pick_one(wg->advanced_security_config.transport_packet_magic_header),
+-					  wg->advanced_security_config.transport_packet_junk_size,
+-					  skb,
+-					  PACKET_CB(first)->keypair))) {
++			u32 type;
++
++			type = wg_u32_range_pick_one(cfg.transport_packet_magic_header);
++			if (likely(encrypt_packet(&cfg, type, junk_size, skb,
++						  keypair))) {
+ 				wg_reset_packet(skb, true);
+ 			} else {
+ 				state = PACKET_STATE_DEAD;
+ 				break;
+ 			}
+ 		}
++		memzero_explicit(&cfg, sizeof(cfg));
+ 		wg_queue_enqueue_per_peer_tx(first, state);
+ 		if (need_resched())
+ 			cond_resched();
+diff --git a/drivers/net/wireguard/socket.c b/drivers/net/wireguard/socket.c
+index 7515d0320328..a8a179ec0f59 100644
+--- a/drivers/net/wireguard/socket.c
++++ b/drivers/net/wireguard/socket.c
+@@ -191,18 +191,20 @@ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
+ 	return ret;
+ }
+ 
+-int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
++int wg_socket_send_buffer_to_peer(struct wg_peer *peer,
++				  const struct wg_obfuscation *cfg, void *buffer,
+ 				  size_t len, u8 ds, size_t padding,
+ 				  bool trailer)
+ {
+-	size_t trailer_len = trailer ?
+-		wg_peer_skb_random_trailer(peer, peer->device,
+-					   padding + len) : 0;
+-	struct sk_buff *skb = alloc_skb(len + padding + trailer_len +
+-					SKB_HEADER_LEN, GFP_ATOMIC);
+ 	struct chacha_state state;
++	struct sk_buff *skb;
++	size_t trailer_len;
+ 	void *pad = NULL;
+ 
++	trailer_len = trailer ?
++		wg_peer_random_trailer_len(peer, padding + len) : 0;
++	skb = alloc_skb(len + padding + trailer_len + SKB_HEADER_LEN,
++			GFP_ATOMIC);
+ 	if (unlikely(!skb))
+ 		return -ENOMEM;
+ 
+@@ -215,22 +217,23 @@ int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
+ 	buffer = skb_put_data(skb, buffer, len);
+ 	if (trailer_len)
+ 		get_random_bytes(skb_put(skb, trailer_len), trailer_len);
+-	if (pad && awg_header_protection_init(&state, peer->device, pad))
++	if (pad && wg_header_protection_init_state(&state, cfg, pad))
+ 		chacha20_crypt(&state, buffer, buffer, len);
+ 	PACKET_CB(skb)->inner_len = 0;
+ 	return wg_socket_send_skb_to_peer(peer, skb, ds);
+ }
+ 
+ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
++					  const struct wg_obfuscation *cfg,
+ 					  struct sk_buff *in_skb, void *buffer,
+-					  size_t len, size_t padding)
++					  size_t len, size_t padding, bool trailer)
+ {
+-	int ret = 0;
+-	struct sk_buff *skb;
+ 	struct chacha_state state;
+ 	struct endpoint endpoint;
++	struct sk_buff *skb;
+ 	size_t trailer_len;
+ 	u8 *pad = NULL;
++	int ret = 0;
+ 
+ 	if (unlikely(!in_skb))
+ 		return -EINVAL;
+@@ -238,7 +241,8 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
+ 	if (unlikely(ret < 0))
+ 		return ret;
+ 
+-	trailer_len = wg_peer_skb_random_trailer(NULL, wg, padding + len);
++	trailer_len = trailer ?
++		wg_peer_random_trailer_len(NULL, padding + len) : 0;
+ 
+ 	skb = alloc_skb(len + padding + trailer_len + SKB_HEADER_LEN,
+ 			GFP_ATOMIC);
+@@ -253,7 +257,7 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
+ 	buffer = skb_put_data(skb, buffer, len);
+ 	if (trailer_len)
+ 		get_random_bytes(skb_put(skb, trailer_len), trailer_len);
+-	if (pad && awg_header_protection_init(&state, wg, pad))
++	if (pad && wg_header_protection_init_state(&state, cfg, pad))
+ 		chacha20_crypt(&state, buffer, buffer, len);
+ 
+ 	if (endpoint.addr.sa_family == AF_INET)
+@@ -329,7 +333,7 @@ void wg_socket_set_peer_endpoint(struct wg_peer *peer,
+ 	dst_cache_reset(&peer->endpoint_cache);
+ out:
+ 	write_unlock_bh(&peer->endpoint_lock);
+-	WRITE_ONCE(peer->udp_window, DEFAULT_UDP_WINDOW);
++	WRITE_ONCE(peer->max_packet_size, DEFAULT_PEER_PACKET_SIZE);
+ }
+ 
+ void wg_socket_set_peer_endpoint_from_skb(struct wg_peer *peer,
+diff --git a/drivers/net/wireguard/socket.h b/drivers/net/wireguard/socket.h
+index 4da7c505772f..9f80ac5a650f 100644
+--- a/drivers/net/wireguard/socket.h
++++ b/drivers/net/wireguard/socket.h
+@@ -14,15 +14,17 @@
+ int wg_socket_init(struct wg_device *wg, u16 port);
+ void wg_socket_reinit(struct wg_device *wg, struct sock *new4,
+ 		      struct sock *new6);
+-int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *data,
++int wg_socket_send_buffer_to_peer(struct wg_peer *peer,
++				  const struct wg_obfuscation *cfg, void *data,
+ 				  size_t len, u8 ds, size_t padding,
+ 				  bool trailer);
+ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb,
+ 			       u8 ds);
+ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
++					  const struct wg_obfuscation *cfg,
+ 					  struct sk_buff *in_skb,
+ 					  void *out_buffer, size_t len,
+-					  size_t padding);
++					  size_t padding, bool trailer);
+ 
+ int wg_socket_endpoint_from_skb(struct endpoint *endpoint,
+ 				const struct sk_buff *skb);
+diff --git a/drivers/net/wireguard/timers.c b/drivers/net/wireguard/timers.c
+index 63f87fcadb2f..ed1918ca8dc9 100644
+--- a/drivers/net/wireguard/timers.c
++++ b/drivers/net/wireguard/timers.c
+@@ -8,7 +8,7 @@
+ #include "peer.h"
+ #include "queueing.h"
+ #include "socket.h"
+-#include "type.h"
++#include "range.h"
+ 
+ /*
+  * - Timer for retransmitting the handshake if we don't hear back after
+@@ -28,11 +28,6 @@
+  * specified seconds.
+  */
+ 
+-static inline struct amnezia_config *peer_config(struct wg_peer *peer)
+-{
+-	return &peer->device->advanced_security_config;
+-}
+-
+ static inline void mod_peer_timer(struct wg_peer *peer,
+ 				  struct timer_list *timer,
+ 				  unsigned long expires)
+@@ -48,8 +43,15 @@ static void wg_expired_retransmit_handshake(struct timer_list *timer)
+ {
+ 	struct wg_peer *peer = timer_container_of(peer, timer,
+ 						  timer_retransmit_handshake);
+-	u16 timeout = u16_range_pick_or(peer_config(peer)->reject_after_time,
+-					REJECT_AFTER_TIME);
++	const struct wg_obfuscation *cfg;
++	u16 zero_key_timeout, rekey_timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	zero_key_timeout = wg_u16_range_pick_or(cfg->reject_after_time,
++						REJECT_AFTER_TIME);
++	rekey_timeout = wg_rekey_timeout(cfg);
++	rcu_read_unlock();
+ 
+ 	if (peer->timer_handshake_attempts > peer->max_handshake_attempts) {
+ 		pr_debug("%s: Handshake for peer %llu (%pISpfsc) did not complete after %d attempts, giving up\n",
+@@ -67,12 +69,12 @@ static void wg_expired_retransmit_handshake(struct timer_list *timer)
+ 		 */
+ 		if (!timer_pending(&peer->timer_zero_key_material))
+ 			mod_peer_timer(peer, &peer->timer_zero_key_material,
+-				       jiffies + timeout * 3 * HZ);
++				       jiffies + zero_key_timeout * 3 * HZ);
+ 	} else {
+ 		++peer->timer_handshake_attempts;
+ 		pr_debug("%s: Handshake for peer %llu (%pISpfsc) did not complete after %d seconds, retrying (try %d)\n",
+ 			 peer->device->dev->name, peer->internal_id,
+-			 &peer->endpoint.addr, (int)wg_peer_rekey_timeout(peer),
++			 &peer->endpoint.addr, (int)rekey_timeout,
+ 			 peer->timer_handshake_attempts + 1);
+ 
+ 		/* We clear the endpoint address src address, in case this is
+@@ -88,8 +90,14 @@ static void wg_expired_send_keepalive(struct timer_list *timer)
+ {
+ 	struct wg_peer *peer = timer_container_of(peer, timer,
+ 						  timer_send_keepalive);
+-	u16 timeout = u16_range_pick_or(peer_config(peer)->keepalive_timeout,
+-					KEEPALIVE_TIMEOUT);
++	const struct wg_obfuscation *cfg;
++	u16 timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	timeout = wg_u16_range_pick_or(cfg->keepalive_timeout,
++				       KEEPALIVE_TIMEOUT);
++	rcu_read_unlock();
+ 
+ 	wg_packet_send_keepalive(peer);
+ 	if (peer->timer_need_another_keepalive) {
+@@ -150,17 +158,22 @@ static void wg_expired_send_persistent_keepalive(struct timer_list *timer)
+ 	struct wg_peer *peer = timer_container_of(peer, timer,
+ 						  timer_persistent_keepalive);
+ 
+-	if (likely(!u16_range_is_zero(peer->persistent_keepalive_interval)))
++	if (likely(!wg_u16_range_is_zero(peer->persistent_keepalive_interval)))
+ 		wg_packet_send_keepalive(peer);
+ }
+ 
+ /* Should be called after an authenticated data packet is sent. */
+ void wg_timers_data_sent(struct wg_peer *peer)
+ {
+-	u16 keepalive_timeout = u16_range_hi_or(peer_config(peer)->keepalive_timeout,
+-						KEEPALIVE_TIMEOUT);
+-	u16 rekey_timeout = u16_range_pick_or(peer_config(peer)->rekey_timeout,
+-					      REKEY_TIMEOUT);
++	const struct wg_obfuscation *cfg;
++	u16 keepalive_timeout, rekey_timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	keepalive_timeout = wg_u16_range_hi_or(cfg->keepalive_timeout,
++					       KEEPALIVE_TIMEOUT);
++	rekey_timeout = wg_u16_range_pick_or(cfg->rekey_timeout, REKEY_TIMEOUT);
++	rcu_read_unlock();
+ 
+ 	if (!timer_pending(&peer->timer_new_handshake))
+ 		mod_peer_timer(peer, &peer->timer_new_handshake,
+@@ -171,8 +184,14 @@ void wg_timers_data_sent(struct wg_peer *peer)
+ /* Should be called after an authenticated data packet is received. */
+ void wg_timers_data_received(struct wg_peer *peer)
+ {
+-	u16 timeout = u16_range_pick_or(peer_config(peer)->keepalive_timeout,
+-					KEEPALIVE_TIMEOUT);
++	const struct wg_obfuscation *cfg;
++	u16 timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	timeout = wg_u16_range_pick_or(cfg->keepalive_timeout,
++				       KEEPALIVE_TIMEOUT);
++	rcu_read_unlock();
+ 
+ 	if (likely(netif_running(peer->device->dev))) {
+ 		if (!timer_pending(&peer->timer_send_keepalive))
+@@ -202,8 +221,13 @@ void wg_timers_any_authenticated_packet_received(struct wg_peer *peer)
+ /* Should be called after a handshake initiation message is sent. */
+ void wg_timers_handshake_initiated(struct wg_peer *peer)
+ {
+-	u16 timeout = u16_range_pick_or(peer_config(peer)->rekey_timeout,
+-					REKEY_TIMEOUT);
++	const struct wg_obfuscation *cfg;
++	u16 timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	timeout = wg_rekey_timeout(cfg);
++	rcu_read_unlock();
+ 
+ 	mod_peer_timer(peer, &peer->timer_retransmit_handshake,
+ 		       jiffies + timeout * HZ +
+@@ -215,9 +239,14 @@ void wg_timers_handshake_initiated(struct wg_peer *peer)
+  */
+ void wg_timers_handshake_complete(struct wg_peer *peer)
+ {
++	const struct wg_obfuscation *cfg;
++
+ 	timer_delete(&peer->timer_retransmit_handshake);
+ 	peer->timer_handshake_attempts = 0;
+-	peer->max_handshake_attempts = wg_peer_pick_max_handshake_attempts(peer);
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	peer->max_handshake_attempts = wg_pick_max_handshake_attempts(cfg);
++	rcu_read_unlock();
+ 	peer->sent_lastminute_handshake = false;
+ 	ktime_get_real_ts64(&peer->walltime_last_handshake);
+ }
+@@ -227,8 +256,14 @@ void wg_timers_handshake_complete(struct wg_peer *peer)
+  */
+ void wg_timers_session_derived(struct wg_peer *peer)
+ {
+-	u16 timeout = u16_range_pick_or(peer_config(peer)->reject_after_time,
+-					REJECT_AFTER_TIME);
++	const struct wg_obfuscation *cfg;
++	u16 timeout;
++
++	rcu_read_lock();
++	cfg = rcu_dereference(peer->device->obfuscation);
++	timeout = wg_u16_range_pick_or(cfg->reject_after_time,
++				       REJECT_AFTER_TIME);
++	rcu_read_unlock();
+ 
+ 	mod_peer_timer(peer, &peer->timer_zero_key_material,
+ 		       jiffies + timeout * 3 * HZ);
+@@ -239,10 +274,10 @@ void wg_timers_session_derived(struct wg_peer *peer)
+  */
+ void wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer)
+ {
+-	if (!u16_range_is_zero(peer->persistent_keepalive_interval))
++	if (!wg_u16_range_is_zero(peer->persistent_keepalive_interval))
+ 		mod_peer_timer(peer, &peer->timer_persistent_keepalive,
+ 			jiffies +
+-			u16_range_pick_one(peer->persistent_keepalive_interval) * HZ);
++			wg_u16_range_pick_one(peer->persistent_keepalive_interval) * HZ);
+ }
+ 
+ void wg_timers_init(struct wg_peer *peer)
+@@ -257,7 +292,8 @@ void wg_timers_init(struct wg_peer *peer)
+ 		    wg_expired_send_persistent_keepalive, 0);
+ 	INIT_WORK(&peer->clear_peer_work, wg_queued_expired_zero_key_material);
+ 	peer->timer_handshake_attempts = 0;
+-	peer->max_handshake_attempts = wg_peer_pick_max_handshake_attempts(peer);
++	peer->max_handshake_attempts =
++		wg_pick_max_handshake_attempts(wg_obfuscation_locked(peer->device));
+ 	peer->sent_lastminute_handshake = false;
+ 	peer->timer_need_another_keepalive = false;
+ }
+diff --git a/drivers/net/wireguard/type.h b/drivers/net/wireguard/type.h
+deleted file mode 100644
+index e3d736fec865..000000000000
+--- a/drivers/net/wireguard/type.h
++++ /dev/null
+@@ -1,101 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _WG_TYPE_H
+-#define _WG_TYPE_H
+-
+-#include <linux/types.h>
+-#include <linux/random.h>
+-
+-typedef u64 u32_range_t;
+-
+-static inline void u32_range_init(u32_range_t *range, u32 lo, u32 hi)
+-{
+-	*range = (u64)hi << 32 | (u64)lo;
+-}
+-
+-static inline u32 u32_range_lo(u32_range_t range)
+-{
+-	return (u32)range;
+-}
+-
+-static inline u32 u32_range_hi(u32_range_t range)
+-{
+-	return (u32)(range >> 32);
+-}
+-
+-static inline bool u32_range_contains(u32_range_t range, u32 val)
+-{
+-	return u32_range_lo(range) <= val && val <= u32_range_hi(range);
+-}
+-
+-static inline bool u32_range_is_zero(u32_range_t range)
+-{
+-	return range == 0;
+-}
+-
+-static inline bool u32_range_overlap(u32_range_t left, u32_range_t right)
+-{
+-	return u32_range_lo(left) <= u32_range_hi(right) &&
+-	       u32_range_lo(right) <= u32_range_hi(left);
+-}
+-
+-static inline u32 u32_range_pick_one(u32_range_t range)
+-{
+-	return get_random_u32_inclusive(u32_range_lo(range),
+-					u32_range_hi(range));
+-}
+-
+-typedef u32 u16_range_t;
+-
+-static inline void u16_range_init(u16_range_t *range, u16 lo, u16 hi)
+-{
+-	*range = (u32)hi << 16 | (u32)lo;
+-}
+-
+-static inline u16 u16_range_lo(u16_range_t range)
+-{
+-	return (u16)range;
+-}
+-
+-static inline u16 u16_range_hi(u16_range_t range)
+-{
+-	return (u16)(range >> 16);
+-}
+-
+-static inline bool u16_range_contains(u16_range_t range, u16 val)
+-{
+-	return u16_range_lo(range) <= val && val <= u16_range_hi(range);
+-}
+-
+-static inline bool u16_range_is_zero(u16_range_t range)
+-{
+-	return range == 0;
+-}
+-
+-static inline bool u16_range_overlap(u16_range_t left, u16_range_t right)
+-{
+-	return u16_range_lo(left) <= u16_range_hi(right) &&
+-	       u16_range_lo(right) <= u16_range_hi(left);
+-}
+-
+-static inline u16 u16_range_pick_one(u16_range_t range)
+-{
+-	return get_random_u32_inclusive(u16_range_lo(range),
+-					u16_range_hi(range));
+-}
+-
+-static inline u16 u16_range_pick_or(u16_range_t range, u16 fallback)
+-{
+-	return u16_range_is_zero(range) ? fallback : u16_range_pick_one(range);
+-}
+-
+-static inline u16 u16_range_lo_or(u16_range_t range, u16 fallback)
+-{
+-	return u16_range_is_zero(range) ? fallback : u16_range_lo(range);
+-}
+-
+-static inline u16 u16_range_hi_or(u16_range_t range, u16 fallback)
+-{
+-	return u16_range_is_zero(range) ? fallback : u16_range_hi(range);
+-}
+-
+-#endif /* _WG_TYPE_H */
+diff --git a/include/uapi/linux/wireguard.h b/include/uapi/linux/wireguard.h
+index 167f8f9b6dbc..475b1a458811 100644
+--- a/include/uapi/linux/wireguard.h
++++ b/include/uapi/linux/wireguard.h
+@@ -67,11 +67,11 @@
+  *    WGDEVICE_A_H4: NLA_U64
+  *    WGDEVICE_A_S3: NLA_U16
+  *    WGDEVICE_A_S4: NLA_U16
+- *    WGDEVICE_A_I1: NLA_NUL_STRING
+- *    WGDEVICE_A_I2: NLA_NUL_STRING
+- *    WGDEVICE_A_I3: NLA_NUL_STRING
+- *    WGDEVICE_A_I4: NLA_NUL_STRING
+- *    WGDEVICE_A_I5: NLA_NUL_STRING
++ *    WGDEVICE_A_I1: NLA_NUL_STRING, maxlen 5120
++ *    WGDEVICE_A_I2: NLA_NUL_STRING, maxlen 5120
++ *    WGDEVICE_A_I3: NLA_NUL_STRING, maxlen 5120
++ *    WGDEVICE_A_I4: NLA_NUL_STRING, maxlen 5120
++ *    WGDEVICE_A_I5: NLA_NUL_STRING, maxlen 5120
+  *    WGDEVICE_A_HEADER_PROTECTION_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
+  *    WGDEVICE_A_CONTENT_PADDING_ADDITION: NLA_U32
+  *    WGDEVICE_A_REKEY_AFTER_TIME: NLA_U32
+@@ -81,7 +81,11 @@
+  *    WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS: NLA_U32
+  *    WGDEVICE_A_RANDOM_TRAILERS: NLA_U8
+  *    WGDEVICE_A_DISABLE_COOKIES: NLA_U8
+- *    WGDEVICE_A_CREATING_NET: NLA_S32
++ *    WGDEVICE_A_CREATING_NET: NLA_S32, the network namespace ID of the
++ *                             namespace in which the interface was created,
++ *                             relative to the requesting socket's namespace;
++ *                             -1 when it is the requesting namespace or cannot
++ *                             be represented
+  *
+  * It is possible that all of the allowed IPs of a single peer will not
+  * fit within a single netlink message. In that case, the same peer will
+@@ -125,7 +129,13 @@
+  *                            peer should only be set if it already exists.
+  *            WGPEER_A_PRESHARED_KEY: len WG_KEY_LEN, all zeros to remove
+  *            WGPEER_A_ENDPOINT: struct sockaddr_in or struct sockaddr_in6
+- *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U32, 0 to disable
++ *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U16 for a fixed
++ *                                                    interval, or NLA_U32
++ *                                                    for a u16 range, low
++ *                                                    bound in the lower 16
++ *                                                    bits, high bound in
++ *                                                    the upper; 0 to
++ *                                                    disable
+  *            WGPEER_A_ALLOWEDIPS: NLA_NESTED
+  *                0: NLA_NESTED
+  *                    WGALLOWEDIP_A_FAMILY: NLA_U16
+@@ -163,11 +173,16 @@
+  *                   low bound in the lower 32 bits, high bound in the upper
+  *    WGDEVICE_A_S3: NLA_U16, cookie packet junk size (S3)
+  *    WGDEVICE_A_S4: NLA_U16, transport packet junk size (S4)
+- *    WGDEVICE_A_I1: NLA_NUL_STRING, CPS packet descriptor (I1)
+- *    WGDEVICE_A_I2: NLA_NUL_STRING, CPS packet descriptor (I2)
+- *    WGDEVICE_A_I3: NLA_NUL_STRING, CPS packet descriptor (I3)
+- *    WGDEVICE_A_I4: NLA_NUL_STRING, CPS packet descriptor (I4)
+- *    WGDEVICE_A_I5: NLA_NUL_STRING, CPS packet descriptor (I5)
++ *    WGDEVICE_A_I1: NLA_NUL_STRING, maxlen 5120, CPS packet
++ *                   descriptor (I1)
++ *    WGDEVICE_A_I2: NLA_NUL_STRING, maxlen 5120, CPS packet
++ *                   descriptor (I2)
++ *    WGDEVICE_A_I3: NLA_NUL_STRING, maxlen 5120, CPS packet
++ *                   descriptor (I3)
++ *    WGDEVICE_A_I4: NLA_NUL_STRING, maxlen 5120, CPS packet
++ *                   descriptor (I4)
++ *    WGDEVICE_A_I5: NLA_NUL_STRING, maxlen 5120, CPS packet
++ *                   descriptor (I5)
+  *    WGDEVICE_A_HEADER_PROTECTION_KEY: NLA_EXACT_LEN, len WG_KEY_LEN, ChaCha20
+  *                                      key encrypting the message header; needs
+  *                                      every S1-S4 at least 12 bytes to carry
+diff --git a/tools/testing/selftests/wireguard/netns.sh b/tools/testing/selftests/wireguard/netns.sh
+index a8f550aecb35..ee3fa5a39a89 100755
+--- a/tools/testing/selftests/wireguard/netns.sh
++++ b/tools/testing/selftests/wireguard/netns.sh
+@@ -31,6 +31,8 @@ NPROC=( /sys/devices/system/cpu/cpu+([0-9]) ); NPROC=${#NPROC[@]}
+ netns0="wg-test-$$-0"
+ netns1="wg-test-$$-1"
+ netns2="wg-test-$$-2"
++netns3="wg-test-$$-anon"
++anon_pid=""
+ pretty() { echo -e "\x1b[32m\x1b[1m[+] ${1:+NS$1: }${2}\x1b[0m" >&3; }
+ pp() { pretty "" "$*"; "$@"; }
+ maybe_exec() { if [[ $BASHPID -eq $$ ]]; then "$@"; else exec "$@"; fi; }
+@@ -55,7 +57,9 @@ cleanup() {
+ 	ip1 link del dev wg1
+ 	ip2 link del dev wg0
+ 	ip2 link del dev wg1
++	[[ -n $anon_pid ]] && kill "$anon_pid"
+ 	local to_kill="$(ip netns pids $netns0) $(ip netns pids $netns1) $(ip netns pids $netns2)"
++	ip netns del $netns3 2>/dev/null
+ 	[[ -n $to_kill ]] && kill $to_kill
+ 	pp ip netns del $netns1
+ 	pp ip netns del $netns2
+@@ -70,6 +74,7 @@ printf 0 > /proc/sys/net/core/message_cost
+ ip netns del $netns0 2>/dev/null || true
+ ip netns del $netns1 2>/dev/null || true
+ ip netns del $netns2 2>/dev/null || true
++ip netns del $netns3 2>/dev/null || true
+ pp ip netns add $netns0
+ pp ip netns add $netns1
+ pp ip netns add $netns2
+@@ -79,6 +84,43 @@ ip0 link add dev wg0 type wireguard
+ ip0 link set wg0 netns $netns1
+ ip0 link add dev wg0 type wireguard
+ ip0 link set wg0 netns $netns2
++if n1 wg show wg0 creating-netns >/dev/null 2>&1; then
++	[[ $(n1 wg show wg0 creating-netns) == "$netns0" ]]
++	[[ $(n2 wg show wg0 creating-netns) == "$netns0" ]]
++	[[ $(n1 wg show all creating-netns) == $'wg0\t'"$netns0" ]]
++	[[ $(n1 wg show wg0) == *"creating netns: $netns0"* ]]
++	IFS=$'\t' read -ra dump_fields < <(n1 wg show wg0 dump)
++	[[ ${dump_fields[${#dump_fields[@]} - 1]} == "$netns0" ]]
++
++	pp ip netns add $netns3
++	ip netns exec $netns3 bash -c 'while :; do read -t 1 -N 0 || true; done' &
++	anon_pid=$!
++	ip -n $netns3 link add dev wg-anon type wireguard
++	ip -n $netns3 link set wg-anon netns $netns1
++	pp ip netns del $netns3
++	creating_netns="$(n1 wg show wg-anon creating-netns)"
++	[[ $creating_netns == +([0-9]) ]] || {
++		echo "unexpected anonymous creating namespace: $creating_netns" >&3
++		false
++	}
++	[[ $(n1 wg show wg-anon) == *"creating netnsid: $creating_netns"* ]]
++	kill "$anon_pid"
++	wait "$anon_pid" 2>/dev/null || true
++	anon_pid=""
++	for ((i = 0; i < 50; ++i)); do
++		[[ $(n1 wg show wg-anon creating-netns) == "unknown" ]] && break
++		sleep 0.1
++	done
++	[[ $(n1 wg show wg-anon creating-netns) == "unknown" ]]
++	ip1 link del dev wg-anon
++
++	ip1 link add dev wg-local type wireguard
++	[[ $(n1 wg show wg-local creating-netns) == "unknown" ]]
++	[[ $(n1 wg show wg-local) == *"creating netnsid: unknown"* ]]
++	IFS=$'\t' read -ra dump_fields < <(n1 wg show wg-local dump)
++	[[ ${dump_fields[${#dump_fields[@]} - 1]} == "unknown" ]]
++	ip1 link del dev wg-local
++fi
+ key1="$(pp wg genkey)"
+ key2="$(pp wg genkey)"
+ key3="$(pp wg genkey)"
+@@ -115,6 +157,157 @@ configure_peers() {
+ }
+ configure_peers
+ 
++config_has_line() {
++	local config="$1" line="$2"
++
++	[[ $'\n'"$config"$'\n' == *$'\n'"$line"$'\n'* ]]
++}
++
++awg_assert_rejected() {
++	local before after
++
++	before="$(n1 wg showconf awgtest)"
++	! n1 wg set awgtest "$@"
++	after="$(n1 wg showconf awgtest)"
++	[[ $after == "$before" ]]
++}
++
++awg_expire_session() {
++	n1 wg set wg0 private-key /dev/null
++	n1 wg set wg0 private-key <(echo "$key1")
++}
++
++awg_tests() {
++	local config hpkey other_hpkey oversized_i1 server_pid client_pid
++
++	pretty "" "AmneziaWG configuration validation"
++	hpkey="$(pp wg genkey)"
++	other_hpkey="$(pp wg genkey)"
++	ip1 link add dev awgtest type wireguard
++	n1 wg set awgtest \
++		jc 3 jmin 40 jmax 80 \
++		s1 16 s2 32 s3 16 s4 16 \
++		h1 100-110 h2 200-210 h3 300-310 h4 400-410 \
++		i1 '<b 0xd1><r 5>' i2 '<c>' i3 '<t>' i4 '<rc 5>' i5 '<rd 5>' \
++		header-protection-key <(echo "$hpkey") \
++		content-padding-addition 4-12 \
++		rekey-after-time 30-31 rekey-timeout 5-6 \
++		reject-after-time 60-61 keepalive-timeout 10-11 \
++		max-handshake-attempts 4-5 random-trailers on disable-cookies on
++
++	config="$(n1 wg showconf awgtest)"
++	config_has_line "$config" "Jc = 3"
++	config_has_line "$config" "Jmin = 40"
++	config_has_line "$config" "Jmax = 80"
++	config_has_line "$config" "S1 = 16"
++	config_has_line "$config" "S2 = 32"
++	config_has_line "$config" "S3 = 16"
++	config_has_line "$config" "S4 = 16"
++	config_has_line "$config" "H1 = 100-110"
++	config_has_line "$config" "H2 = 200-210"
++	config_has_line "$config" "H3 = 300-310"
++	config_has_line "$config" "H4 = 400-410"
++	config_has_line "$config" "I1 = <b 0xd1><r 5>"
++	config_has_line "$config" "I2 = <c>"
++	config_has_line "$config" "I3 = <t>"
++	config_has_line "$config" "I4 = <rc 5>"
++	config_has_line "$config" "I5 = <rd 5>"
++	config_has_line "$config" "HeaderProtectionKey = $hpkey"
++	config_has_line "$config" "ContentPaddingAddition = 4-12"
++	config_has_line "$config" "RekeyAfterTime = 30-31"
++	config_has_line "$config" "RekeyTimeout = 5-6"
++	config_has_line "$config" "RejectAfterTime = 60-61"
++	config_has_line "$config" "KeepaliveTimeout = 10-11"
++	config_has_line "$config" "MaxHandshakeAttempts = 4-5"
++	config_has_line "$config" "RandomTrailers = on"
++	config_has_line "$config" "DisableCookies = on"
++
++	# Each rejected update must leave the published configuration untouched.
++	# These inversions are rejected by wg before a netlink message is sent.
++	awg_assert_rejected h1 1200-1100
++	awg_assert_rejected rekey-timeout 7-3
++
++	# These reach the kernel's validation of the staged configuration.
++	awg_assert_rejected rekey-timeout 0-7
++	awg_assert_rejected reject-after-time 0-61
++	awg_assert_rejected keepalive-timeout 0-11
++	awg_assert_rejected jmax 40000
++	awg_assert_rejected jmin 100 jmax 50
++	awg_assert_rejected h1 205-215
++	awg_assert_rejected s1 4
++	awg_assert_rejected s1 65535
++	awg_assert_rejected i1 '<invalid>'
++	awg_assert_rejected s1 16 s2 72
++
++	# The tools enforce the UAPI string bound before sending it to the kernel.
++	printf -v oversized_i1 '%*s' 5121 ''
++	awg_assert_rejected i1 "$oversized_i1"
++	ip1 link del dev awgtest
++
++	pretty "" "AmneziaWG interoperability and concurrent reconfiguration"
++	n1 wg set wg0 \
++		jc 3 jmin 40 jmax 80 \
++		s1 16 s2 32 s3 16 s4 16 \
++		h1 100-110 h2 200-210 h3 300-310 h4 400-410 \
++		i1 '<b 0xd1><r 5>' i2 '<c>' i3 '<t>' i4 '<rc 5>' i5 '<rd 5>' \
++		header-protection-key <(echo "$hpkey") \
++		content-padding-addition 4-12 random-trailers on disable-cookies on
++	n2 wg set wg0 \
++		jc 3 jmin 40 jmax 80 \
++		s1 16 s2 32 s3 16 s4 16 \
++		h1 100-110 h2 200-210 h3 300-310 h4 400-410 \
++		i1 '<b 0xd1><r 5>' i2 '<c>' i3 '<t>' i4 '<rc 5>' i5 '<rd 5>' \
++		header-protection-key <(echo "$hpkey") \
++		content-padding-addition 4-12 random-trailers on disable-cookies on
++	n1 wg set wg0 peer "$pub2" endpoint 127.0.0.1:2
++	n2 wg set wg0 peer "$pub1" endpoint 127.0.0.1:1
++	n1 ping -W 5 -c 1 192.168.241.2
++
++	# A one-sided header-protection key must make the peers incompatible.
++	n2 wg set wg0 header-protection-key <(echo "$other_hpkey")
++	! n1 ping -W 1 -c 3 192.168.241.2
++	n2 wg set wg0 header-protection-key <(echo "$hpkey")
++	n1 ping -W 5 -c 1 192.168.241.2
++
++	# H1 is used only by handshakes, so discard the initiator's session first.
++	n2 wg set wg0 h1 120-130
++	awg_expire_session
++	! n1 ping -W 1 -c 3 192.168.241.2
++	n2 wg set wg0 h1 100-110
++	awg_expire_session
++	n1 ping -W 5 -c 1 192.168.241.2
++
++	# Re-publish the RCU-owned configuration while both softirq paths are busy.
++	n2 iperf3 -s -1 -B 192.168.241.2 &
++	server_pid=$!
++	waitiperf $netns2 $server_pid
++	n1 iperf3 -Z -t 5 -c 192.168.241.2 &
++	client_pid=$!
++	while kill -0 "$client_pid" 2>/dev/null; do
++		n1 wg set wg0 header-protection-key <(echo "$hpkey") s4 16 content-padding-addition 4-12
++		n2 wg set wg0 header-protection-key <(echo "$hpkey") s4 16 content-padding-addition 4-12
++	done
++	wait $client_pid
++	wait $server_pid
++
++	# Recreate the pair so the upstream counter checks start from zero and the
++	# remainder of the suite exercises the baseline defaults.
++	ip1 link del dev wg0
++	ip2 link del dev wg0
++	ip0 link add dev wg0 type wireguard
++	ip0 link set wg0 netns $netns1
++	ip0 link add dev wg0 type wireguard
++	ip0 link set wg0 netns $netns2
++	configure_peers
++}
++
++# Stock wireguard-tools does not know the AWG fields. Keep the upstream suite
++# usable with it, while running the extension tests when an AWG-capable wg is
++# embedded by the QEMU harness.
++if n1 wg show wg0 jc >/dev/null 2>&1; then
++	awg_tests
++fi
++
+ tests() {
+ 	# Ping over IPv4
+ 	n2 ping -c 10 -f -W 1 192.168.241.1
+diff --git a/tools/testing/selftests/wireguard/qemu/Makefile b/tools/testing/selftests/wireguard/qemu/Makefile
+index 791d21b736a5..18e7d7a9db74 100644
+--- a/tools/testing/selftests/wireguard/qemu/Makefile
++++ b/tools/testing/selftests/wireguard/qemu/Makefile
+@@ -8,6 +8,7 @@ PWD := $(shell pwd)
+ KERNEL_PATH ?= $(PWD)/../../../../..
+ BUILD_PATH ?= $(PWD)/build/$(ARCH)
+ DISTFILES_PATH ?= $(PWD)/distfiles
++WIREGUARD_TOOLS_SOURCE ?=
+ NR_CPUS ?= 4
+ ARCH ?=
+ CBUILD := $(shell gcc -dumpmachine)
+@@ -43,7 +44,12 @@ $(eval $(call tar_download,IPROUTE2,iproute2,5.17.0,.tar.gz,https://www.kernel.o
+ $(eval $(call tar_download,IPTABLES,iptables,1.8.7,.tar.bz2,https://www.netfilter.org/projects/iptables/files/,c109c96bb04998cd44156622d36f8e04b140701ec60531a10668cfdff5e8d8f0))
+ $(eval $(call tar_download,NMAP,nmap,7.92,.tgz,https://nmap.org/dist/,064183ea642dc4c12b1ab3b5358ce1cef7d2e7e11ffa2849f16d339f5b717117))
+ $(eval $(call tar_download,IPUTILS,iputils,s20190709,.tar.gz,https://github.com/iputils/iputils/archive/s20190709.tar.gz/#,a15720dd741d7538dd2645f9f516d193636ae4300ff7dbc8bfca757bf166490a))
++ifeq ($(strip $(WIREGUARD_TOOLS_SOURCE)),)
+ $(eval $(call tar_download,WIREGUARD_TOOLS,wireguard-tools,1.0.20250521,.tar.xz,https://git.zx2c4.com/wireguard-tools/snapshot/,b6f2628b85b1b23cc06517ec9c74f82d52c4cdbd020f3dd2f00c972a1782950e))
++else
++WIREGUARD_TOOLS_SOURCE := $(abspath $(WIREGUARD_TOOLS_SOURCE))
++WIREGUARD_TOOLS_PATH := $(BUILD_PATH)/wireguard-tools-local
++endif
+ 
+ export CFLAGS := -O3 -pipe
+ ifeq ($(HOST_ARCH),$(ARCH))
+@@ -372,6 +378,7 @@ $(IPERF_PATH)/src/iperf3: | $(IPERF_PATH)/.installed $(USERSPACE_DEPS)
+ 	$(MAKE) -C $(IPERF_PATH)
+ 	$(STRIP) -s $@
+ 
++ifeq ($(strip $(WIREGUARD_TOOLS_SOURCE)),)
+ $(WIREGUARD_TOOLS_PATH)/.installed: $(WIREGUARD_TOOLS_TAR)
+ 	mkdir -p $(BUILD_PATH)
+ 	flock -s $<.lock tar -C $(BUILD_PATH) -xf $<
+@@ -380,6 +387,20 @@ $(WIREGUARD_TOOLS_PATH)/.installed: $(WIREGUARD_TOOLS_TAR)
+ $(WIREGUARD_TOOLS_PATH)/src/wg: | $(WIREGUARD_TOOLS_PATH)/.installed $(USERSPACE_DEPS)
+ 	$(MAKE) -C $(WIREGUARD_TOOLS_PATH)/src wg
+ 	$(STRIP) -s $@
++else
++.PHONY: wireguard-tools-local
++wireguard-tools-local:
++	if [ -d "$(WIREGUARD_TOOLS_PATH)" ]; then chmod -R u+w "$(WIREGUARD_TOOLS_PATH)"; fi
++	rm -rf "$(WIREGUARD_TOOLS_PATH)"
++	mkdir -p "$(WIREGUARD_TOOLS_PATH)"
++	cp -a "$(WIREGUARD_TOOLS_SOURCE)/src" "$(WIREGUARD_TOOLS_PATH)/"
++	chmod -R u+w "$(WIREGUARD_TOOLS_PATH)/src"
++
++$(WIREGUARD_TOOLS_PATH)/src/wg: wireguard-tools-local | $(USERSPACE_DEPS)
++	$(MAKE) -C $(WIREGUARD_TOOLS_PATH)/src clean
++	$(MAKE) -C $(WIREGUARD_TOOLS_PATH)/src wg
++	$(STRIP) -s $@
++endif
+ 
+ $(BUILD_PATH)/init: init.c | $(USERSPACE_DEPS)
+ 	mkdir -p $(BUILD_PATH)

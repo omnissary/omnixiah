@@ -1,0 +1,206 @@
+From 71aa477f5ea7937276aaf70fd4e1687b717e1ecf Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Fri, 18 Sep 2026 13:51:10 +0000
+Subject: [PATCH] wireguard: expose per-peer inner traffic counters
+
+Track per-peer inner IP bytes and packets in both directions and expose
+the cumulative counters through generic netlink.
+
+Preserve the existing transport byte and netdev statistics semantics.
+Exclude handshakes, keepalives, junk, CPS, cookie replies, and rejected
+packets from the new counters.
+
+Carry the original plaintext length through skb->cb so transmit counters
+are updated only after a successful send. The added field consumes
+existing struct padding and does not increase packet_cb size on 64-bit
+systems.
+
+Add WGPEER_A_{RX,TX}_INNER_BYTES and WGPEER_A_{RX,TX}_PACKETS as
+append-only UAPI attributes.
+---
+ drivers/net/wireguard/netlink.c  | 14 +++++++++++++-
+ drivers/net/wireguard/peer.h     |  3 ++-
+ drivers/net/wireguard/queueing.h |  1 +
+ drivers/net/wireguard/receive.c  | 15 +++++++++------
+ drivers/net/wireguard/send.c     |  1 +
+ drivers/net/wireguard/socket.c   |  7 ++++++-
+ include/uapi/linux/wireguard.h   |  8 ++++++++
+ 7 files changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/wireguard/netlink.c b/drivers/net/wireguard/netlink.c
+index 50e9d33a0555..e0bd3a09d2c7 100644
+--- a/drivers/net/wireguard/netlink.c
++++ b/drivers/net/wireguard/netlink.c
+@@ -61,7 +61,11 @@ static const struct nla_policy peer_policy[WGPEER_A_MAX + 1] = {
+ 	[WGPEER_A_TX_BYTES]				= { .type = NLA_U64 },
+ 	[WGPEER_A_ALLOWEDIPS]				= { .type = NLA_NESTED },
+ 	[WGPEER_A_PROTOCOL_VERSION]			= { .type = NLA_U32 },
+-	[WGPEER_A_ADVANCED_SECURITY]    		= { .type = NLA_FLAG }
++	[WGPEER_A_ADVANCED_SECURITY]			= { .type = NLA_FLAG },
++	[WGPEER_A_RX_INNER_BYTES]			= { .type = NLA_U64 },
++	[WGPEER_A_TX_INNER_BYTES]			= { .type = NLA_U64 },
++	[WGPEER_A_RX_PACKETS]				= { .type = NLA_U64 },
++	[WGPEER_A_TX_PACKETS]				= { .type = NLA_U64 }
+ };
+ 
+ static const struct nla_policy allowedip_policy[WGALLOWEDIP_A_MAX + 1] = {
+@@ -164,6 +168,14 @@ get_peer(struct wg_peer *peer, struct sk_buff *skb, struct dump_ctx *ctx)
+ 				      WGPEER_A_UNSPEC) ||
+ 		    nla_put_u64_64bit(skb, WGPEER_A_RX_BYTES, peer->rx_bytes,
+ 				      WGPEER_A_UNSPEC) ||
++		    nla_put_u64_64bit(skb, WGPEER_A_RX_INNER_BYTES,
++				      peer->rx_inner_bytes, WGPEER_A_UNSPEC) ||
++		    nla_put_u64_64bit(skb, WGPEER_A_TX_INNER_BYTES,
++				      peer->tx_inner_bytes, WGPEER_A_UNSPEC) ||
++		    nla_put_u64_64bit(skb, WGPEER_A_RX_PACKETS,
++				      peer->rx_packets, WGPEER_A_UNSPEC) ||
++		    nla_put_u64_64bit(skb, WGPEER_A_TX_PACKETS,
++				      peer->tx_packets, WGPEER_A_UNSPEC) ||
+ 		    nla_put_u32(skb, WGPEER_A_PROTOCOL_VERSION, 1) ||
+ 		    (peer->advanced_security &&
+ 		     nla_put_flag(skb, WGPEER_A_ADVANCED_SECURITY)))
+diff --git a/drivers/net/wireguard/peer.h b/drivers/net/wireguard/peer.h
+index 60c7ab7b9ab1..a51068c6e069 100644
+--- a/drivers/net/wireguard/peer.h
++++ b/drivers/net/wireguard/peer.h
+@@ -49,7 +49,8 @@ struct wg_peer {
+ 	struct work_struct transmit_handshake_work, clear_peer_work, transmit_packet_work;
+ 	struct cookie latest_cookie;
+ 	struct hlist_node pubkey_hash;
+-	u64 rx_bytes, tx_bytes;
++	u64 rx_bytes, tx_bytes, rx_inner_bytes, tx_inner_bytes;
++	u64 rx_packets, tx_packets;
+ 	struct timer_list timer_retransmit_handshake, timer_send_keepalive;
+ 	struct timer_list timer_new_handshake, timer_zero_key_material;
+ 	struct timer_list timer_persistent_keepalive;
+diff --git a/drivers/net/wireguard/queueing.h b/drivers/net/wireguard/queueing.h
+index 79b6d70de236..e912bb59ea1d 100644
+--- a/drivers/net/wireguard/queueing.h
++++ b/drivers/net/wireguard/queueing.h
+@@ -61,6 +61,7 @@ struct packet_cb {
+ 	struct noise_keypair *keypair;
+ 	atomic_t state;
+ 	u32 mtu;
++	u32 inner_len;
+ 	u8 ds;
+ };
+ 
+diff --git a/drivers/net/wireguard/receive.c b/drivers/net/wireguard/receive.c
+index d49d0c506cae..aa2a9a0239aa 100644
+--- a/drivers/net/wireguard/receive.c
++++ b/drivers/net/wireguard/receive.c
+@@ -17,10 +17,13 @@
+ #include <net/ip_tunnels.h>
+ 
+ /* Must be called with bh disabled. */
+-static void update_rx_stats(struct wg_peer *peer, size_t len)
++static void update_rx_stats(struct wg_peer *peer, size_t transport_len,
++			    size_t inner_len)
+ {
+-	dev_sw_netstats_rx_add(peer->device->dev, len);
+-	peer->rx_bytes += len;
++	dev_sw_netstats_rx_add(peer->device->dev, transport_len);
++	peer->rx_bytes += transport_len;
++	peer->rx_inner_bytes += inner_len;
++	peer->rx_packets += !!inner_len;
+ }
+ 
+ static size_t validate_header_len(struct sk_buff *skb, struct wg_device *wg)
+@@ -241,7 +244,7 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
+ 	}
+ 
+ 	local_bh_disable();
+-	update_rx_stats(peer, skb->len);
++	update_rx_stats(peer, skb->len, 0);
+ 	local_bh_enable();
+ 
+ 	wg_timers_any_authenticated_packet_received(peer);
+@@ -401,7 +404,7 @@ static void wg_packet_consume_data_done(struct wg_peer *peer,
+ 
+ 	/* A packet with length 0 is a keepalive packet */
+ 	if (unlikely(!skb->len)) {
+-		update_rx_stats(peer, message_data_len(0));
++		update_rx_stats(peer, message_data_len(0), 0);
+ 		net_dbg_ratelimited("%s: Receiving keepalive packet from peer %llu (%pISpfsc)\n",
+ 				    dev->name, peer->internal_id,
+ 				    &peer->endpoint.addr);
+@@ -455,7 +458,7 @@ static void wg_packet_consume_data_done(struct wg_peer *peer,
+ 		goto dishonest_packet_peer;
+ 
+ 	napi_gro_receive(&peer->napi, skb);
+-	update_rx_stats(peer, message_data_len(len_before_trim));
++	update_rx_stats(peer, message_data_len(len_before_trim), len);
+ 	return;
+ 
+ dishonest_packet_peer:
+diff --git a/drivers/net/wireguard/send.c b/drivers/net/wireguard/send.c
+index c1dda1eaf209..c064d634d68a 100644
+--- a/drivers/net/wireguard/send.c
++++ b/drivers/net/wireguard/send.c
+@@ -250,6 +250,7 @@ static bool encrypt_packet(u32 message_type, u16 junk_size,
+ 	skb_get_hash(skb);
+ 
+ 	/* Calculate lengths. */
++	PACKET_CB(skb)->inner_len = skb->len;
+ 	padding_len = calculate_skb_padding(skb);
+ 	trailer_len = padding_len + noise_encrypted_len(0);
+ 	plaintext_len = skb->len + padding_len;
+diff --git a/drivers/net/wireguard/socket.c b/drivers/net/wireguard/socket.c
+index 08de23ee90b7..2105f1ee27ae 100644
+--- a/drivers/net/wireguard/socket.c
++++ b/drivers/net/wireguard/socket.c
+@@ -168,6 +168,7 @@ out:
+ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
+ {
+ 	size_t skb_len = skb->len;
++	u32 inner_len = PACKET_CB(skb)->inner_len;
+ 	int ret = -EAFNOSUPPORT;
+ 
+ 	read_lock_bh(&peer->endpoint_lock);
+@@ -179,8 +180,11 @@ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
+ 			    &peer->endpoint_cache);
+ 	else
+ 		dev_kfree_skb(skb);
+-	if (likely(!ret))
++	if (likely(!ret)) {
+ 		peer->tx_bytes += skb_len;
++		peer->tx_inner_bytes += inner_len;
++		peer->tx_packets += !!inner_len;
++	}
+ 	read_unlock_bh(&peer->endpoint_lock);
+ 
+ 	return ret;
+@@ -197,6 +201,7 @@ int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
+ 	skb_reserve(skb, SKB_HEADER_LEN);
+ 	skb_set_inner_network_header(skb, 0);
+ 	skb_put_data(skb, buffer, len);
++	PACKET_CB(skb)->inner_len = 0;
+ 	return wg_socket_send_skb_to_peer(peer, skb, ds);
+ }
+ 
+diff --git a/include/uapi/linux/wireguard.h b/include/uapi/linux/wireguard.h
+index beeb6845a277..a770f594302e 100644
+--- a/include/uapi/linux/wireguard.h
++++ b/include/uapi/linux/wireguard.h
+@@ -38,6 +38,10 @@
+  *            WGPEER_A_LAST_HANDSHAKE_TIME: NLA_EXACT_LEN, struct __kernel_timespec
+  *            WGPEER_A_RX_BYTES: NLA_U64
+  *            WGPEER_A_TX_BYTES: NLA_U64
++ *            WGPEER_A_RX_INNER_BYTES: NLA_U64
++ *            WGPEER_A_TX_INNER_BYTES: NLA_U64
++ *            WGPEER_A_RX_PACKETS: NLA_U64
++ *            WGPEER_A_TX_PACKETS: NLA_U64
+  *            WGPEER_A_ALLOWEDIPS: NLA_NESTED
+  *                0: NLA_NESTED
+  *                    WGALLOWEDIP_A_FAMILY: NLA_U16
+@@ -262,6 +266,10 @@ enum wgpeer_attribute {
+ 	WGPEER_A_ALLOWEDIPS,
+ 	WGPEER_A_PROTOCOL_VERSION,
+ 	WGPEER_A_ADVANCED_SECURITY,
++	WGPEER_A_RX_INNER_BYTES,
++	WGPEER_A_TX_INNER_BYTES,
++	WGPEER_A_RX_PACKETS,
++	WGPEER_A_TX_PACKETS,
+ 	__WGPEER_A_LAST
+ };
+ #define WGPEER_A_MAX (__WGPEER_A_LAST - 1)

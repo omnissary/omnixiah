@@ -1,0 +1,441 @@
+From 8000a97dcca925f6b4dc13e3d2783039ed7b3894 Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Mon, 26 Oct 2026 08:07:35 +0000
+Subject: [PATCH] show the creating network namespace
+
+The kernel reports the namespace where a WireGuard interface was
+created as an ID relative to the reader. Read that signed attribute and
+look through RUNSTATEDIR/netns with RTM_GETNSID for a matching name, the
+same way ip turns a link netns ID back into a name.
+
+Show the name when one is available and keep the numeric ID when the
+namespace has no name. A negative ID is shown as unknown, while a kernel
+without the attribute leaves the field absent.
+
+Add creating-netns to the script-friendly selectors and to the normal
+interface display. Append it to the device row in dump output as well;
+showconf is unchanged because the namespace is runtime state, not
+configuration.
+---
+ src/completion/wg.bash-completion |   2 +-
+ src/containers.h                  |   4 +-
+ src/ipc-linux.h                   | 151 ++++++++++++++++++++++++++++++
+ src/ipc.c                         |  10 ++
+ src/ipc.h                         |   2 +
+ src/man/wg.8                      |  11 ++-
+ src/netlink.h                     |   5 +
+ src/show.c                        |  46 ++++++++-
+ src/uapi/linux/linux/wireguard.h  |   6 +-
+ 9 files changed, 227 insertions(+), 10 deletions(-)
+
+diff --git a/src/completion/wg.bash-completion b/src/completion/wg.bash-completion
+index 3c062b4..ee1b2f3 100644
+--- a/src/completion/wg.bash-completion
++++ b/src/completion/wg.bash-completion
+@@ -22,7 +22,7 @@ _wg_completion() {
+ 	fi
+ 
+ 	if [[ $COMP_CWORD -eq 3 && ${COMP_WORDS[1]} == show && ${COMP_WORDS[2]} != interfaces ]]; then
+-		COMPREPLY+=( $(compgen -W "public-key private-key listen-port peers preshared-keys endpoints allowed-ips fwmark latest-handshakes persistent-keepalive transfer dump" -- "${COMP_WORDS[3]}") )
++		COMPREPLY+=( $(compgen -W "public-key private-key listen-port creating-netns peers preshared-keys endpoints allowed-ips fwmark latest-handshakes persistent-keepalive transfer dump" -- "${COMP_WORDS[3]}") )
+ 		return
+ 	fi
+ 
+diff --git a/src/containers.h b/src/containers.h
+index 735a20c..b1137c3 100644
+--- a/src/containers.h
++++ b/src/containers.h
+@@ -107,7 +107,8 @@ enum {
+ 	WGDEVICE_HAS_KEEPALIVE_TIMEOUT = 1U << 26,
+ 	WGDEVICE_HAS_MAX_HANDSHAKE_ATTEMPTS = 1U << 27,
+ 	WGDEVICE_HAS_RANDOM_TRAILERS = 1U << 28,
+-	WGDEVICE_HAS_DISABLE_COOKIES = 1U << 29
++	WGDEVICE_HAS_DISABLE_COOKIES = 1U << 29,
++	WGDEVICE_HAS_CREATING_NET = 1U << 30
+ };
+ 
+ struct wgdevice {
+@@ -150,6 +151,7 @@ struct wgdevice {
+ 	uint32_t max_handshake_attempts;
+ 	bool random_trailers;
+ 	bool disable_cookies;
++	int32_t creating_net_nsid;
+ };
+ 
+ #define for_each_wgpeer(__dev, __peer) for ((__peer) = (__dev)->first_peer; (__peer); (__peer) = (__peer)->next_peer)
+diff --git a/src/ipc-linux.h b/src/ipc-linux.h
+index cf9c23d..247dc92 100644
+--- a/src/ipc-linux.h
++++ b/src/ipc-linux.h
+@@ -6,6 +6,8 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <dirent.h>
++#include <fcntl.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <errno.h>
+@@ -16,6 +18,7 @@
+ #include <linux/genetlink.h>
+ #include <linux/if_link.h>
+ #include <linux/netlink.h>
++#include <linux/net_namespace.h>
+ #include <linux/rtnetlink.h>
+ #include <linux/wireguard.h>
+ #include <netinet/in.h>
+@@ -32,6 +35,148 @@ struct interface {
+ 	bool is_wireguard;
+ };
+ 
++struct netns_map_entry {
++	int32_t nsid;
++	char *name;
++	struct netns_map_entry *next;
++};
++
++struct netns_id {
++	int32_t value;
++	bool found;
++};
++
++static struct netns_map_entry *netns_map;
++
++static int parse_netns_id(const struct nlattr *attr, void *data)
++{
++	struct netns_id *id = data;
++
++	if (mnl_attr_get_type(attr) == NETNSA_NSID &&
++	    !mnl_attr_validate(attr, MNL_TYPE_U32)) {
++		id->value = mnl_attr_get_s32(attr);
++		id->found = true;
++	}
++	return MNL_CB_OK;
++}
++
++static int read_netns_id_cb(const struct nlmsghdr *nlh, void *data)
++{
++	if (nlh->nlmsg_type != RTM_NEWNSID) {
++		errno = EBADMSG;
++		return MNL_CB_ERROR;
++	}
++	if (mnl_attr_parse(nlh, sizeof(struct rtgenmsg), parse_netns_id, data) < 0)
++		return MNL_CB_ERROR;
++	return MNL_CB_STOP;
++}
++
++static int netns_id_from_fd(struct mnl_socket *nl, void *buffer, int fd,
++			    unsigned int seq)
++{
++	struct netns_id id = { .value = -1 };
++	struct nlmsghdr *nlh;
++	struct rtgenmsg *rtg;
++	unsigned int portid = mnl_socket_get_portid(nl);
++	ssize_t len;
++
++	nlh = mnl_nlmsg_put_header(buffer);
++	nlh->nlmsg_type = RTM_GETNSID;
++	nlh->nlmsg_flags = NLM_F_REQUEST;
++	nlh->nlmsg_seq = seq;
++	rtg = mnl_nlmsg_put_extra_header(nlh, sizeof(*rtg));
++	rtg->rtgen_family = AF_UNSPEC;
++	mnl_attr_put_u32(nlh, NETNSA_FD, fd);
++
++	if (mnl_socket_sendto(nl, buffer, nlh->nlmsg_len) < 0)
++		return -1;
++	if ((len = mnl_socket_recvfrom(nl, buffer, SOCKET_BUFFER_SIZE)) < 0)
++		return -1;
++	if (mnl_cb_run(buffer, len, seq, portid, read_netns_id_cb, &id) < 0 ||
++	    !id.found)
++		return -1;
++	return id.value;
++}
++
++static const char *netns_map_find(int32_t nsid)
++{
++	struct netns_map_entry *entry;
++
++	for (entry = netns_map; entry; entry = entry->next)
++		if (entry->nsid == nsid)
++			return entry->name;
++	return NULL;
++}
++
++static void netns_map_refresh(void)
++{
++	struct mnl_socket *nl = NULL;
++	struct dirent *entry;
++	unsigned int seq = time(NULL);
++	void *buffer = NULL;
++	DIR *dir = NULL;
++
++	dir = opendir(RUNSTATEDIR "/netns");
++	if (!dir)
++		goto out;
++	nl = mnl_socket_open(NETLINK_ROUTE);
++	if (!nl || mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0)
++		goto out;
++	buffer = calloc(SOCKET_BUFFER_SIZE, 1);
++	if (!buffer)
++		goto out;
++
++	while ((entry = readdir(dir))) {
++		struct netns_map_entry *mapped;
++		int32_t nsid;
++		int fd;
++
++		if (entry->d_name[0] == '.' &&
++		    (!entry->d_name[1] ||
++		     (entry->d_name[1] == '.' && !entry->d_name[2])))
++			continue;
++		fd = openat(dirfd(dir), entry->d_name, O_RDONLY | O_CLOEXEC);
++		if (fd < 0)
++			continue;
++		nsid = netns_id_from_fd(nl, buffer, fd, ++seq);
++		close(fd);
++		if (nsid < 0 || netns_map_find(nsid))
++			continue;
++		mapped = calloc(1, sizeof(*mapped));
++		if (!mapped)
++			break;
++		mapped->name = strdup(entry->d_name);
++		if (!mapped->name) {
++			free(mapped);
++			break;
++		}
++		mapped->nsid = nsid;
++		mapped->next = netns_map;
++		netns_map = mapped;
++	}
++
++out:
++	free(buffer);
++	if (nl)
++		mnl_socket_close(nl);
++	if (dir)
++		closedir(dir);
++}
++
++static char *kernel_get_netns_name(int32_t nsid)
++{
++	const char *name;
++
++	if (nsid < 0)
++		return NULL;
++	name = netns_map_find(nsid);
++	if (!name) {
++		netns_map_refresh();
++		name = netns_map_find(nsid);
++	}
++	return name ? strdup(name) : NULL;
++}
++
+ static int parse_linkinfo(const struct nlattr *attr, void *data)
+ {
+ 	struct interface *interface = data;
+@@ -706,6 +851,12 @@ static int parse_device(const struct nlattr *attr, void *data)
+ 			device->flags |= WGDEVICE_HAS_DISABLE_COOKIES;
+ 		}
+ 		break;
++	case WGDEVICE_A_CREATING_NET:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			device->creating_net_nsid = mnl_attr_get_s32(attr);
++			device->flags |= WGDEVICE_HAS_CREATING_NET;
++		}
++		break;
+ 	}
+ 
+ #undef parse_string_attr
+diff --git a/src/ipc.c b/src/ipc.c
+index 1155bd5..0c6a959 100644
+--- a/src/ipc.c
++++ b/src/ipc.c
+@@ -96,3 +96,13 @@ int ipc_set_device(struct wgdevice *dev)
+ 	return userspace_set_device(dev);
+ #endif
+ }
++
++char *ipc_get_netns_name(int32_t nsid)
++{
++#if defined(__linux__)
++	return kernel_get_netns_name(nsid);
++#else
++	(void)nsid;
++	return NULL;
++#endif
++}
+diff --git a/src/ipc.h b/src/ipc.h
+index bc0fd60..8402ea0 100644
+--- a/src/ipc.h
++++ b/src/ipc.h
+@@ -7,11 +7,13 @@
+ #define IPC_H
+ 
+ #include <stdbool.h>
++#include <stdint.h>
+ 
+ struct wgdevice;
+ 
+ int ipc_set_device(struct wgdevice *dev);
+ int ipc_get_device(struct wgdevice **dev, const char *interface);
+ char *ipc_list_devices(void);
++char *ipc_get_netns_name(int32_t nsid);
+ 
+ #endif
+diff --git a/src/man/wg.8 b/src/man/wg.8
+index a0fc04c..edda40c 100644
+--- a/src/man/wg.8
++++ b/src/man/wg.8
+@@ -36,7 +36,7 @@ Sub-commands that take an INTERFACE must be passed a WireGuard interface.
+ .SH COMMANDS
+ 
+ .TP
+-\fBshow\fP { \fI<interface>\fP | \fIall\fP | \fIinterfaces\fP } [\fIpublic-key\fP | \fIprivate-key\fP | \fIlisten-port\fP | \fIfwmark\fP | \fIpeers\fP | \fIpreshared-keys\fP | \fIendpoints\fP | \fIallowed-ips\fP | \fIlatest-handshakes\fP | \fIpersistent-keepalive\fP | \fItransfer\fP | \fIdump\fP]
++\fBshow\fP { \fI<interface>\fP | \fIall\fP | \fIinterfaces\fP } [\fIpublic-key\fP | \fIprivate-key\fP | \fIlisten-port\fP | \fIfwmark\fP | \fIcreating-netns\fP | \fIpeers\fP | \fIpreshared-keys\fP | \fIendpoints\fP | \fIallowed-ips\fP | \fIlatest-handshakes\fP | \fIpersistent-keepalive\fP | \fItransfer\fP | \fIdump\fP]
+ Shows current WireGuard configuration and runtime information of specified \fI<interface>\fP.
+ If no \fI<interface>\fP is specified, \fI<interface>\fP defaults to \fIall\fP.
+ If \fIinterfaces\fP is specified, prints a list of all WireGuard interfaces,
+@@ -45,9 +45,12 @@ specification, then prints a list of all attributes in a visually pleasing way
+ meant for the terminal. Otherwise, prints specified information grouped by
+ newlines and tabs, meant to be used in scripts. For this script-friendly display,
+ if \fIall\fP is specified, then the first field for all categories of information
+-is the interface name. If \fPdump\fP is specified, then several lines are printed;
+-the first contains in order separated by tab: private-key, public-key, listen-port,
+-fwmark. Subsequent lines are printed for each peer and contain in order separated
++is the interface name. The \fIcreating-netns\fP value is the creating network
++namespace name when resolvable, its numeric namespace ID otherwise, \fIunknown\fP
++for a negative namespace ID, or \fI(none)\fP when unsupported by the kernel.
++If \fPdump\fP is specified, then several lines are printed; the first contains
++the device fields separated by tabs, with creating-netns as its final field.
++Subsequent lines are printed for each peer and contain in order separated
+ by tab: public-key, preshared-key, endpoint, allowed-ips, latest-handshake,
+ transfer-rx, transfer-tx, persistent-keepalive.
+ .TP
+diff --git a/src/netlink.h b/src/netlink.h
+index eedacc4..a357e7c 100644
+--- a/src/netlink.h
++++ b/src/netlink.h
+@@ -290,6 +290,11 @@ static uint32_t mnl_attr_get_u32(const struct nlattr *attr)
+ 	return *((uint32_t *)mnl_attr_get_payload(attr));
+ }
+ 
++static int32_t mnl_attr_get_s32(const struct nlattr *attr)
++{
++	return (int32_t)mnl_attr_get_u32(attr);
++}
++
+ static uint64_t mnl_attr_get_u64(const struct nlattr *attr)
+ {
+ 	uint64_t tmp;
+diff --git a/src/show.c b/src/show.c
+index c308b8d..3a2898a 100644
+--- a/src/show.c
++++ b/src/show.c
+@@ -206,16 +206,38 @@ static char *bytes(uint64_t b)
+ 	return buf;
+ }
+ 
++struct creating_net {
++	char *name;
++	char id[16];
++};
++
++static const char *creating_net(struct wgdevice *device,
++				struct creating_net *net)
++{
++	*net = (struct creating_net){ 0 };
++	if (!(device->flags & WGDEVICE_HAS_CREATING_NET))
++		return "(none)";
++	if (device->creating_net_nsid < 0)
++		return "unknown";
++	net->name = ipc_get_netns_name(device->creating_net_nsid);
++	if (net->name)
++		return net->name;
++	snprintf(net->id, sizeof(net->id), "%d",
++			 device->creating_net_nsid);
++	return net->id;
++}
++
+ static const char *COMMAND_NAME;
+ static void show_usage(void)
+ {
+-	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump | jc | jmin | jmax | s1 | s2 | s3 | s4 | h1 | h2 | h3 | h4 | i1 | i2 | i3 | i4 | i5]\n", PROG_NAME, COMMAND_NAME);
++	fprintf(stderr, "Usage: %s %s { <interface> | all | interfaces } [public-key | private-key | listen-port | fwmark | creating-netns | peers | preshared-keys | endpoints | allowed-ips | latest-handshakes | transfer | persistent-keepalive | dump | jc | jmin | jmax | s1 | s2 | s3 | s4 | h1 | h2 | h3 | h4 | i1 | i2 | i3 | i4 | i5]\n", PROG_NAME, COMMAND_NAME);
+ }
+ 
+ static void pretty_print(struct wgdevice *device)
+ {
+ 	struct wgpeer *peer;
+ 	struct wgallowedip *allowedip;
++	struct creating_net net;
+ 
+ 	terminal_printf(TERMINAL_RESET);
+ 	terminal_printf(TERMINAL_FG_GREEN TERMINAL_BOLD "interface" TERMINAL_RESET ": " TERMINAL_FG_GREEN "%s" TERMINAL_RESET "\n", device->name);
+@@ -227,6 +249,14 @@ static void pretty_print(struct wgdevice *device)
+ 		terminal_printf("  " TERMINAL_BOLD "listening port" TERMINAL_RESET ": %u\n", device->listen_port);
+ 	if (device->fwmark)
+ 		terminal_printf("  " TERMINAL_BOLD "fwmark" TERMINAL_RESET ": 0x%x\n", device->fwmark);
++	if (device->flags & WGDEVICE_HAS_CREATING_NET) {
++		const char *value = creating_net(device, &net);
++
++		terminal_printf("  " TERMINAL_BOLD "%s" TERMINAL_RESET ": %s\n",
++				net.name ? "creating netns" : "creating netnsid",
++				value);
++		free(net.name);
++	}
+ 	if (device->junk_packet_count)
+ 		terminal_printf("  " TERMINAL_BOLD "jc" TERMINAL_RESET ": %u\n", device->junk_packet_count);
+ 	if (device->junk_packet_min_size)
+@@ -311,6 +341,7 @@ static void dump_print(struct wgdevice *device, bool with_interface)
+ {
+ 	struct wgpeer *peer;
+ 	struct wgallowedip *allowedip;
++	struct creating_net net;
+ 
+ 	if (with_interface)
+ 		printf("%s\t", device->name);
+@@ -343,9 +374,11 @@ static void dump_print(struct wgdevice *device, bool with_interface)
+ 	fputs(device->i5 ? device->i5 : "(null)", stdout);
+ 	fputc('\t', stdout);
+ 	if (device->fwmark)
+-		printf("0x%x\n", device->fwmark);
++		printf("0x%x\t", device->fwmark);
+ 	else
+-		printf("off\n");
++		printf("off\t");
++	printf("%s\n", creating_net(device, &net));
++	free(net.name);
+ 	for_each_wgpeer(device, peer) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+@@ -393,6 +426,13 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
+ 			printf("0x%x\n", device->fwmark);
+ 		else
+ 			printf("off\n");
++	} else if (!strcmp(param, "creating-netns")) {
++		struct creating_net net;
++
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%s\n", creating_net(device, &net));
++		free(net.name);
+ 	} else if(!strcmp(param, "jc")) {
+ 		if (with_interface)
+ 			printf("%s\t", device->name);
+diff --git a/src/uapi/linux/linux/wireguard.h b/src/uapi/linux/linux/wireguard.h
+index f8a7012..660b2eb 100644
+--- a/src/uapi/linux/linux/wireguard.h
++++ b/src/uapi/linux/linux/wireguard.h
+@@ -81,7 +81,11 @@
+  *    WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS: NLA_U32
+  *    WGDEVICE_A_RANDOM_TRAILERS: NLA_U8
+  *    WGDEVICE_A_DISABLE_COOKIES: NLA_U8
+- *    WGDEVICE_A_CREATING_NET: NLA_S32
++ *    WGDEVICE_A_CREATING_NET: NLA_S32, the network namespace ID of the
++ *                             namespace in which the interface was created,
++ *                             relative to the requesting socket's namespace;
++ *                             -1 when it is the requesting namespace or cannot
++ *                             be represented
+  *
+  * It is possible that all of the allowed IPs of a single peer will not
+  * fit within a single netlink message. In that case, the same peer will

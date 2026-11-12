@@ -1,0 +1,996 @@
+From ec8f4ff044aed600b3eede9828abff78d588bbea Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Sat, 16 Nov 2024 23:54:35 +0000
+Subject: [PATCH] drop in amneziawg
+
+---
+ src/Makefile                     |   1 +
+ src/config.c                     | 183 ++++++++++++++++++++++++++++++-
+ src/containers.h                 |  27 ++++-
+ src/ipc-freebsd.h                |  82 ++++++++++++++
+ src/ipc-linux.h                  |  96 ++++++++++++++++
+ src/ipc-openbsd.h                |  91 +++++++++++++++
+ src/ipc-uapi.h                   |  49 +++++++++
+ src/set.c                        |   2 +-
+ src/show.c                       |  65 ++++++++++-
+ src/showconf.c                   |  22 ++++
+ src/uapi/linux/linux/wireguard.h |  37 +++++++
+ src/uapi/openbsd/net/if_wg.h     |  16 +--
+ 12 files changed, 658 insertions(+), 13 deletions(-)
+
+diff --git a/src/Makefile b/src/Makefile
+index 1c4b3f6..3657833 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -38,6 +38,7 @@ endif
+ PLATFORM ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ 
+ CFLAGS ?= -O3
++
+ ifneq ($(wildcard uapi/$(PLATFORM)/.),)
+ CFLAGS += -isystem uapi/$(PLATFORM)
+ endif
+diff --git a/src/config.c b/src/config.c
+index 6b8aa58..07aa28d 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -433,6 +433,78 @@ err:
+ 	return false;
+ }
+ 
++static inline bool parse_uint16(uint16_t *device_value, const char *name, const char *value) {
++
++	if (!strlen(value)) {
++		fprintf(stderr, "Unable to parse empty string\n");
++		return false;
++	}
++	
++	char *end;
++	uint32_t ret;
++	ret = strtoul(value, &end, 10);
++
++	if (*end || ret > UINT16_MAX) {
++		fprintf(stderr, "Unable to parse %s: `%s'\n", name, value);
++		exit(1);
++	}
++	*device_value = (uint16_t)ret;
++	return true;
++}
++
++static inline bool parse_uint32(uint32_t *device_value, const char *name, const char *value) {
++
++	if (!strlen(value)) {
++		fprintf(stderr, "Unable to parse empty string\n");
++		return false;
++	}
++
++	char *end;
++	uint64_t ret;
++	ret = strtoul(value, &end, 10);
++	if (*end || ret > UINT32_MAX) {
++		fprintf(stderr, "Unable to parse %s: `%s'\n", name, value);
++		exit(1);
++	}
++	*device_value = (uint32_t)ret;
++	return true;
++}
++
++static inline bool parse_bool(bool *device_value, const char *name, const char *value) {
++
++	if (!strlen(value)) {
++		fprintf(stderr, "Unable to parse empty string\n");
++		return false;
++	}
++
++	if (!strcasecmp(value, "off")) {
++		*device_value = false;
++		return true;
++	}
++
++	if (!strcasecmp(value, "on")) {
++		*device_value = true;
++		return true;
++	}
++
++	if (!char_is_digit(value[0]))
++		goto err;
++
++	char *end;
++	uint32_t ret;
++	ret = strtoul(value, &end, 10);
++
++	if (*end) {
++		fprintf(stderr, "Unable to parse %s: `%s'\n", name, value);
++		exit(1);
++	}
++	*device_value = ret != 0;
++	return true;
++err:
++	fprintf(stderr, "Boolean value is neither on/off nor 0/1: `%s'\n", value);
++	return false;
++}
++
+ static bool process_line(struct config_ctx *ctx, const char *line)
+ {
+ 	const char *value;
+@@ -473,6 +545,42 @@ static bool process_line(struct config_ctx *ctx, const char *line)
+ 			ret = parse_key(ctx->device->private_key, value);
+ 			if (ret)
+ 				ctx->device->flags |= WGDEVICE_HAS_PRIVATE_KEY;
++		} else if (key_match("Jc")) {
++			ret = parse_uint16(&ctx->device->junk_packet_count, "Jc", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_JC;
++		} else if (key_match("Jmin")) {
++			ret = parse_uint16(&ctx->device->junk_packet_min_size, "Jmin", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_JMIN;
++		} else if (key_match("Jmax")) {
++			ret = parse_uint16(&ctx->device->junk_packet_max_size, "Jmax", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_JMAX;
++		} else if (key_match("S1")) {
++			ret = parse_uint16(&ctx->device->init_packet_junk_size, "S1", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_S1;
++		} else if (key_match("S2")) {
++			ret = parse_uint16(&ctx->device->response_packet_junk_size, "S2", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_S2;
++		} else if (key_match("H1")) {
++			ret = parse_uint32(&ctx->device->init_packet_magic_header, "H1", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_H1;
++		} else if (key_match("H2")) {
++			ret = parse_uint32(&ctx->device->response_packet_magic_header, "H2", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_H2;
++		} else if (key_match("H3")) {
++			ret = parse_uint32(&ctx->device->underload_packet_magic_header, "H3", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_H3;
++		} else if (key_match("H4")) {
++			ret = parse_uint32(&ctx->device->transport_packet_magic_header, "H4", value);
++			if (ret)
++				ctx->device->flags |= WGDEVICE_HAS_H4;
+ 		} else
+ 			goto error;
+ 	} else if (ctx->is_peer_section) {
+@@ -490,6 +598,10 @@ static bool process_line(struct config_ctx *ctx, const char *line)
+ 			ret = parse_key(ctx->last_peer->preshared_key, value);
+ 			if (ret)
+ 				ctx->last_peer->flags |= WGPEER_HAS_PRESHARED_KEY;
++		} else if (key_match("AdvancedSecurity")) {
++			ret = parse_bool(&ctx->last_peer->advanced_security, "AdvancedSecurity", value);
++			if (ret)
++				ctx->last_peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
+ 		} else
+ 			goto error;
+ 	} else
+@@ -546,7 +658,7 @@ bool config_read_init(struct config_ctx *ctx, bool append)
+ 		return false;
+ 	}
+ 	if (!append)
+-		ctx->device->flags |= WGDEVICE_REPLACE_PEERS | WGDEVICE_HAS_PRIVATE_KEY | WGDEVICE_HAS_FWMARK | WGDEVICE_HAS_LISTEN_PORT;
++		ctx->device->flags |= WGDEVICE_REPLACE_PEERS | WGDEVICE_HAS_PRIVATE_KEY | WGDEVICE_HAS_FWMARK;
+ 	return true;
+ }
+ 
+@@ -611,6 +723,69 @@ struct wgdevice *config_read_cmd(const char *argv[], int argc)
+ 			device->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+ 			argv += 2;
+ 			argc -= 2;
++		} else if (!strcmp(argv[0], "jc") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->junk_packet_count, "jc", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_JC;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "jmin") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->junk_packet_min_size, "jmin", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_JMIN;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "jmax") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->junk_packet_max_size, "jmax", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_JMAX;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "s1") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->init_packet_junk_size, "s1", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_S1;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "s2") && argc >= 2 && !peer) {
++			if (!parse_uint16(&device->response_packet_junk_size, "s2", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_S2;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "h1") && argc >= 2 && !peer) {
++			if (!parse_uint32(&device->init_packet_magic_header, "h1", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_H1;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "h2") && argc >= 2 && !peer) {
++			if (!parse_uint32(&device->response_packet_magic_header, "h2", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_H2;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "h3") && argc >= 2 && !peer) {
++			if (!parse_uint32(&device->underload_packet_magic_header, "h3", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_H3;
++			argv += 2;
++			argc -= 2;
++		} else if (!strcmp(argv[0], "h4") && argc >= 2 && !peer) {
++			if (!parse_uint32(&device->transport_packet_magic_header, "h4", argv[1]))
++				goto error;
++			
++			device->flags |= WGDEVICE_HAS_H4;
++			argv += 2;
++			argc -= 2;
+ 		} else if (!strcmp(argv[0], "peer") && argc >= 2) {
+ 			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+ 
+@@ -661,6 +836,12 @@ struct wgdevice *config_read_cmd(const char *argv[], int argc)
+ 			peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+ 			argv += 2;
+ 			argc -= 2;
++		} else if (!strcmp(argv[0], "advanced-security") && argc >= 2 && peer) {
++			if (!parse_bool(&peer->advanced_security, "AdvancedSecurity", argv[1]))
++				goto error;
++			peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
++			argv += 2;
++			argc -= 2;
+ 		} else {
+ 			fprintf(stderr, "Invalid argument: %s\n", argv[0]);
+ 			goto error;
+diff --git a/src/containers.h b/src/containers.h
+index 8fd813a..82145f7 100644
+--- a/src/containers.h
++++ b/src/containers.h
+@@ -7,6 +7,7 @@
+ #define CONTAINERS_H
+ 
+ #include <stdint.h>
++#include <stdbool.h>
+ #include <stdlib.h>
+ #include <time.h>
+ #include <sys/socket.h>
+@@ -48,7 +49,8 @@ enum {
+ 	WGPEER_REPLACE_ALLOWEDIPS = 1U << 1,
+ 	WGPEER_HAS_PUBLIC_KEY = 1U << 2,
+ 	WGPEER_HAS_PRESHARED_KEY = 1U << 3,
+-	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4
++	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4,
++	WGPEER_HAS_ADVANCED_SECURITY = 1U << 5
+ };
+ 
+ struct wgpeer {
+@@ -67,6 +69,8 @@ struct wgpeer {
+ 	uint64_t rx_bytes, tx_bytes;
+ 	uint16_t persistent_keepalive_interval;
+ 
++	bool advanced_security;
++
+ 	struct wgallowedip *first_allowedip, *last_allowedip;
+ 	struct wgpeer *next_peer;
+ };
+@@ -76,7 +80,16 @@ enum {
+ 	WGDEVICE_HAS_PRIVATE_KEY = 1U << 1,
+ 	WGDEVICE_HAS_PUBLIC_KEY = 1U << 2,
+ 	WGDEVICE_HAS_LISTEN_PORT = 1U << 3,
+-	WGDEVICE_HAS_FWMARK = 1U << 4
++	WGDEVICE_HAS_FWMARK = 1U << 4,
++	WGDEVICE_HAS_JC = 1U << 5,
++	WGDEVICE_HAS_JMIN = 1U << 6,
++	WGDEVICE_HAS_JMAX = 1U << 7,
++	WGDEVICE_HAS_S1 = 1U << 8,
++	WGDEVICE_HAS_S2 = 1U << 9,
++	WGDEVICE_HAS_H1 = 1U << 10,
++	WGDEVICE_HAS_H2 = 1U << 11,
++	WGDEVICE_HAS_H3 = 1U << 12,
++	WGDEVICE_HAS_H4 = 1U << 13
+ };
+ 
+ struct wgdevice {
+@@ -92,6 +105,16 @@ struct wgdevice {
+ 	uint16_t listen_port;
+ 
+ 	struct wgpeer *first_peer, *last_peer;
++
++	uint16_t junk_packet_count;
++	uint16_t junk_packet_min_size;
++	uint16_t junk_packet_max_size;
++	uint16_t init_packet_junk_size;
++	uint16_t response_packet_junk_size;
++	uint32_t init_packet_magic_header;
++	uint32_t response_packet_magic_header;
++	uint32_t underload_packet_magic_header;
++	uint32_t transport_packet_magic_header;
+ };
+ 
+ #define for_each_wgpeer(__dev, __peer) for ((__peer) = (__dev)->first_peer; (__peer); (__peer) = (__peer)->next_peer)
+diff --git a/src/ipc-freebsd.h b/src/ipc-freebsd.h
+index 58e5e71..926ac63 100644
+--- a/src/ipc-freebsd.h
++++ b/src/ipc-freebsd.h
+@@ -91,6 +91,70 @@ static int kernel_get_device(struct wgdevice **device, const char *ifname)
+ 			dev->flags |= WGDEVICE_HAS_LISTEN_PORT;
+ 		}
+ 	}
++	if (nvlist_exists_number(nvl_device, "jc")) {	
++		number = nvlist_get_number(nvl_device, "jc");
++		if (number <= UINT16_MAX){
++			dev->junk_packet_count = number;
++			dev->flags |= WGDEVICE_HAS_JC;
++		}
++	}
++	if (nvlist_exists_number(nvl_device, "jmin")) {		
++		number = nvlist_get_number(nvl_device, "jmin");
++		if (number <= UINT16_MAX){
++			dev->junk_packet_min_size = number;			
++			dev->flags |= WGDEVICE_HAS_JMIN;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "jmax")) {		
++		number = nvlist_get_number(nvl_device, "jmax");
++		if (number <= UINT16_MAX){
++			dev->junk_packet_max_size = number;			
++			dev->flags |= WGDEVICE_HAS_JMAX;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "s1")) {		
++		number = nvlist_get_number(nvl_device, "s1");
++		if (number <= UINT16_MAX){
++			dev->init_packet_junk_size = number;			
++			dev->flags |= WGDEVICE_HAS_S1;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "s2")) {		
++		number = nvlist_get_number(nvl_device, "s2");
++		if (number <= UINT16_MAX){
++			dev->response_packet_junk_size = number;			
++			dev->flags |= WGDEVICE_HAS_S2;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "h1")) {		
++		number = nvlist_get_number(nvl_device, "h1");
++		if (number <= UINT32_MAX){
++			dev->init_packet_magic_header = number;			
++			dev->flags |= WGDEVICE_HAS_H1;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "h2")) {		
++		number = nvlist_get_number(nvl_device, "h2");
++		if (number <= UINT32_MAX){
++			dev->response_packet_magic_header = number;			
++			dev->flags |= WGDEVICE_HAS_H2;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "h3")) {		
++		number = nvlist_get_number(nvl_device, "h3");
++		if (number <= UINT32_MAX){
++			dev->underload_packet_magic_header = number;			
++			dev->flags |= WGDEVICE_HAS_H3;
++		}			
++	}
++	if (nvlist_exists_number(nvl_device, "h4")) {		
++		number = nvlist_get_number(nvl_device, "h4");
++		if (number <= UINT32_MAX){
++			dev->transport_packet_magic_header = number;			
++			dev->flags |= WGDEVICE_HAS_H4;
++		}			
++	}
++
+ 	if (nvlist_exists_number(nvl_device, "user-cookie")) {
+ 		number = nvlist_get_number(nvl_device, "user-cookie");
+ 		if (number <= UINT32_MAX) {
+@@ -272,6 +336,24 @@ static int kernel_set_device(struct wgdevice *dev)
+ 		nvlist_add_binary(nvl_device, "private-key", dev->private_key, sizeof(dev->private_key));
+ 	if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
+ 		nvlist_add_number(nvl_device, "listen-port", dev->listen_port);
++	if (dev->flags & WGDEVICE_HAS_JC)
++		nvlist_add_number(nvl_device, "jc", dev->junk_packet_count);
++	if (dev->flags & WGDEVICE_HAS_JMIN)
++		nvlist_add_number(nvl_device, "jmin", dev->junk_packet_min_size);
++	if (dev->flags & WGDEVICE_HAS_JMAX)
++		nvlist_add_number(nvl_device, "jmax", dev->junk_packet_max_size);
++	if (dev->flags & WGDEVICE_HAS_S1)
++		nvlist_add_number(nvl_device, "s1", dev->init_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S2)
++		nvlist_add_number(nvl_device, "s2", dev->response_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_H1)
++		nvlist_add_number(nvl_device, "h1", dev->init_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H2)
++		nvlist_add_number(nvl_device, "h2", dev->response_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H3)
++		nvlist_add_number(nvl_device, "h3", dev->underload_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H4)
++		nvlist_add_number(nvl_device, "h4", dev->transport_packet_magic_header);
+ 	if (dev->flags & WGDEVICE_HAS_FWMARK)
+ 		nvlist_add_number(nvl_device, "user-cookie", dev->fwmark);
+ 	if (dev->flags & WGDEVICE_REPLACE_PEERS)
+diff --git a/src/ipc-linux.h b/src/ipc-linux.h
+index 01247f1..49e0b04 100644
+--- a/src/ipc-linux.h
++++ b/src/ipc-linux.h
+@@ -163,6 +163,24 @@ again:
+ 			mnl_attr_put(nlh, WGDEVICE_A_PRIVATE_KEY, sizeof(dev->private_key), dev->private_key);
+ 		if (dev->flags & WGDEVICE_HAS_LISTEN_PORT)
+ 			mnl_attr_put_u16(nlh, WGDEVICE_A_LISTEN_PORT, dev->listen_port);
++		if (dev->flags & WGDEVICE_HAS_JC)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_JC, dev->junk_packet_count);
++		if (dev->flags & WGDEVICE_HAS_JMIN)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_JMIN, dev->junk_packet_min_size);
++		if (dev->flags & WGDEVICE_HAS_JMAX)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_JMAX, dev->junk_packet_max_size);
++		if (dev->flags & WGDEVICE_HAS_S1)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_S1, dev->init_packet_junk_size);
++		if (dev->flags & WGDEVICE_HAS_S2)
++			mnl_attr_put_u16(nlh, WGDEVICE_A_S2, dev->response_packet_junk_size);
++		if (dev->flags & WGDEVICE_HAS_H1)
++			mnl_attr_put_u32(nlh, WGDEVICE_A_H1, dev->init_packet_magic_header);
++		if (dev->flags & WGDEVICE_HAS_H2)
++			mnl_attr_put_u32(nlh, WGDEVICE_A_H2, dev->response_packet_magic_header);
++		if (dev->flags & WGDEVICE_HAS_H3)
++			mnl_attr_put_u32(nlh, WGDEVICE_A_H3, dev->underload_packet_magic_header);
++		if (dev->flags & WGDEVICE_HAS_H4)
++			mnl_attr_put_u32(nlh, WGDEVICE_A_H4, dev->transport_packet_magic_header);
+ 		if (dev->flags & WGDEVICE_HAS_FWMARK)
+ 			mnl_attr_put_u32(nlh, WGDEVICE_A_FWMARK, dev->fwmark);
+ 		if (dev->flags & WGDEVICE_REPLACE_PEERS)
+@@ -203,6 +221,11 @@ again:
+ 					goto toobig_peers;
+ 			}
+ 		}
++		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
++			if (peer->advanced_security)
++				mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ADVANCED_SECURITY, 0, NULL);
++			flags |= WGPEER_F_HAS_ADVANCED_SECURITY;
++		}
+ 		if (flags) {
+ 			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_FLAGS, flags))
+ 				goto toobig_peers;
+@@ -373,6 +396,25 @@ static int parse_peer(const struct nlattr *attr, void *data)
+ 		if (!mnl_attr_validate(attr, MNL_TYPE_U64))
+ 			peer->tx_bytes = mnl_attr_get_u64(attr);
+ 		break;
++	case WGPEER_A_FLAGS:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			uint32_t flags = mnl_attr_get_u32(attr);
++
++			if (flags & WGPEER_F_HAS_ADVANCED_SECURITY && !(peer->flags & WGPEER_HAS_ADVANCED_SECURITY)) {
++				peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
++				peer->advanced_security = false;
++			}
++		}
++		break;
++	case WGPEER_A_ADVANCED_SECURITY:
++		if (!mnl_attr_validate(attr, MNL_TYPE_FLAG)) {
++			peer->advanced_security = true;
++
++			if (!(peer->flags & WGPEER_HAS_ADVANCED_SECURITY)) {
++				peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
++			}
++		}
++		break;
+ 	case WGPEER_A_ALLOWEDIPS:
+ 		return mnl_attr_parse_nested(attr, parse_allowedips, peer);
+ 	}
+@@ -443,6 +485,60 @@ static int parse_device(const struct nlattr *attr, void *data)
+ 		break;
+ 	case WGDEVICE_A_PEERS:
+ 		return mnl_attr_parse_nested(attr, parse_peers, device);
++	case WGDEVICE_A_JC:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->junk_packet_count = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_JC;
++		}
++		break;
++	case WGDEVICE_A_JMIN:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->junk_packet_min_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_JMIN;
++		}
++		break;
++	case WGDEVICE_A_JMAX:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->junk_packet_max_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_JMAX;
++		}
++		break;
++	case WGDEVICE_A_S1:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->init_packet_junk_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_S1;
++		}
++		break;
++	case WGDEVICE_A_S2:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U16)) {
++			device->response_packet_junk_size = mnl_attr_get_u16(attr);
++			device->flags |= WGDEVICE_HAS_S2;
++		}
++		break;
++	case WGDEVICE_A_H1:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			device->init_packet_magic_header = mnl_attr_get_u32(attr);
++			device->flags |= WGDEVICE_HAS_H1;
++		}
++		break;
++	case WGDEVICE_A_H2:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			device->response_packet_magic_header = mnl_attr_get_u32(attr);
++			device->flags |= WGDEVICE_HAS_H2;
++		}
++		break;
++	case WGDEVICE_A_H3:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			device->underload_packet_magic_header = mnl_attr_get_u32(attr);
++			device->flags |= WGDEVICE_HAS_H3;
++		}
++		break;
++	case WGDEVICE_A_H4:
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
++			device->transport_packet_magic_header = mnl_attr_get_u32(attr);
++			device->flags |= WGDEVICE_HAS_H4;
++		}
++		break;
+ 	}
+ 
+ 	return MNL_CB_OK;
+diff --git a/src/ipc-openbsd.h b/src/ipc-openbsd.h
+index 6bb231e..5f215a1 100644
+--- a/src/ipc-openbsd.h
++++ b/src/ipc-openbsd.h
+@@ -110,6 +110,51 @@ static int kernel_get_device(struct wgdevice **device, const char *iface)
+ 		dev->flags |= WGDEVICE_HAS_PRIVATE_KEY;
+ 	}
+ 
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_JC) {
++		dev->junk_packet_count = wg_iface->i_junk_packet_count;
++		dev->flags |= WGDEVICE_HAS_JC;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_JMIN) {
++		dev->junk_packet_min_size = wg_iface->i_junk_packet_min_size;
++		dev->flags |= WGDEVICE_HAS_JMIN;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_JMAX) {
++		dev->junk_packet_max_size = wg_iface->i_junk_packet_max_size;
++		dev->flags |= WGDEVICE_HAS_JMAX;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_S1) {
++		dev->init_packet_junk_size = wg_iface->i_init_packet_junk_size;
++		dev->flags |= WGDEVICE_HAS_S1;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_S2) {
++		dev->response_packet_junk_size = wg_iface->i_response_packet_junk_size;
++		dev->flags |= WGDEVICE_HAS_S2;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H1) {
++		dev->init_packet_magic_header = wg_iface->i_init_packet_magic_header;
++		dev->flags |= WGDEVICE_HAS_H1;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H2) {
++		dev->response_packet_magic_header = wg_iface->i_response_packet_magic_header;
++		dev->flags |= WGDEVICE_HAS_H2;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H3) {
++		dev->underload_packet_magic_header = wg_iface->i_underload_packet_magic_header;
++		dev->flags |= WGDEVICE_HAS_H3;
++	}
++
++	if (wg_iface->i_flags & WG_INTERFACE_DEVICE_HAS_H4) {
++		dev->transport_packet_magic_header = wg_iface->i_transport_packet_magic_header;
++		dev->flags |= WGDEVICE_HAS_H4;
++	}
++	
+ 	wg_peer = &wg_iface->i_peers[0];
+ 	for (size_t i = 0; i < wg_iface->i_peers_count; ++i) {
+ 		peer = calloc(1, sizeof(*peer));
+@@ -221,6 +266,52 @@ static int kernel_set_device(struct wgdevice *dev)
+ 	if (dev->flags & WGDEVICE_REPLACE_PEERS)
+ 		wg_iface->i_flags |= WG_INTERFACE_REPLACE_PEERS;
+ 
++
++	if (dev->flags & WGDEVICE_HAS_JC) {
++		wg_iface->i_junk_packet_count = dev->junk_packet_count;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_JC;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_JMIN) {
++		wg_iface->i_junk_packet_min_size = dev->junk_packet_min_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_JMIN;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_JMAX) {
++		wg_iface->i_junk_packet_max_size = dev->junk_packet_max_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_JMAX;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_S1) {
++		wg_iface->i_init_packet_junk_size = dev->init_packet_junk_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_S1;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_S2) {
++		wg_iface->i_response_packet_junk_size = dev->response_packet_junk_size;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_S2;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_H1) {
++		wg_iface->i_init_packet_magic_header = dev->init_packet_magic_header;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H1;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_H2) {
++		wg_iface->i_response_packet_magic_header = dev->response_packet_magic_header;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H2;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_H3) {
++		wg_iface->i_underload_packet_magic_header = dev->underload_packet_magic_header;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H3;
++	}
++
++	if (dev->flags & WGDEVICE_HAS_H4) {
++		wg_iface->i_transport_packet_magic_header = dev->transport_packet_magic_header;
++		wg_iface->i_flags |= WG_INTERFACE_DEVICE_HAS_H4;
++	}
++
+ 	peer_count = 0;
+ 	wg_peer = &wg_iface->i_peers[0];
+ 	for_each_wgpeer(dev, peer) {
+diff --git a/src/ipc-uapi.h b/src/ipc-uapi.h
+index 1d8a271..9fa62a9 100644
+--- a/src/ipc-uapi.h
++++ b/src/ipc-uapi.h
+@@ -51,10 +51,32 @@ static int userspace_set_device(struct wgdevice *dev)
+ 		fprintf(f, "fwmark=%u\n", dev->fwmark);
+ 	if (dev->flags & WGDEVICE_REPLACE_PEERS)
+ 		fprintf(f, "replace_peers=true\n");
++	if (dev->flags & WGDEVICE_HAS_JC)
++		fprintf(f, "jc=%u\n", dev->junk_packet_count);
++	if (dev->flags & WGDEVICE_HAS_JMIN)
++		fprintf(f, "jmin=%u\n", dev->junk_packet_min_size);
++	if (dev->flags & WGDEVICE_HAS_JMAX)
++		fprintf(f, "jmax=%u\n", dev->junk_packet_max_size);
++	if (dev->flags & WGDEVICE_HAS_S1)
++		fprintf(f, "s1=%u\n", dev->init_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_S2)
++		fprintf(f, "s2=%u\n", dev->response_packet_junk_size);
++	if (dev->flags & WGDEVICE_HAS_H1)
++		fprintf(f, "h1=%u\n", dev->init_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H2)
++		fprintf(f, "h2=%u\n", dev->response_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H3)
++		fprintf(f, "h3=%u\n", dev->underload_packet_magic_header);
++	if (dev->flags & WGDEVICE_HAS_H4)
++		fprintf(f, "h4=%u\n", dev->transport_packet_magic_header);
+ 
+ 	for_each_wgpeer(dev, peer) {
+ 		key_to_hex(hex, peer->public_key);
+ 		fprintf(f, "public_key=%s\n", hex);
++		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
++			ret = -EINVAL;
++			goto out;
++		}
+ 		if (peer->flags & WGPEER_REMOVE_ME) {
+ 			fprintf(f, "remove=true\n");
+ 			continue;
+@@ -183,6 +205,33 @@ static int userspace_get_device(struct wgdevice **out, const char *iface)
+ 		} else if (!peer && !strcmp(key, "fwmark")) {
+ 			dev->fwmark = NUM(0xffffffffU);
+ 			dev->flags |= WGDEVICE_HAS_FWMARK;
++		} else if(!peer && !strcmp(key, "jc")) {
++			dev->junk_packet_count = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_JC;
++		} else if(!peer && !strcmp(key, "jmin")) {
++			dev->junk_packet_min_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_JMIN;
++		} else if(!peer && !strcmp(key, "jmax")) {
++			dev->junk_packet_max_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_JMAX;
++		} else if(!peer && !strcmp(key, "s1")) {
++			dev->init_packet_junk_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_S1;
++		} else if(!peer && !strcmp(key, "s2")) {
++			dev->response_packet_junk_size = NUM(0xffffU);
++			dev->flags |= WGDEVICE_HAS_S2;
++		} else if(!peer && !strcmp(key, "h1")) {
++			dev->init_packet_magic_header = NUM(0xffffffffU);
++			dev->flags |= WGDEVICE_HAS_H1;
++		} else if(!peer && !strcmp(key, "h2")) {
++			dev->response_packet_magic_header = NUM(0xffffffffU);
++			dev->flags |= WGDEVICE_HAS_H2;
++		} else if(!peer && !strcmp(key, "h3")) {
++			dev->underload_packet_magic_header = NUM(0xffffffffU);
++			dev->flags |= WGDEVICE_HAS_H3;
++		} else if(!peer && !strcmp(key, "h4")) {
++			dev->transport_packet_magic_header = NUM(0xffffffffU);
++			dev->flags |= WGDEVICE_HAS_H4;
+ 		} else if (!strcmp(key, "public_key")) {
+ 			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
+ 
+diff --git a/src/set.c b/src/set.c
+index 992ffa2..9324f91 100644
+--- a/src/set.c
++++ b/src/set.c
+@@ -18,7 +18,7 @@ int set_main(int argc, const char *argv[])
+ 	int ret = 1;
+ 
+ 	if (argc < 3) {
+-		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>]...] ]...\n", PROG_NAME, argv[0]);
++		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>] [advanced-security <on|off>]...] ]...\n", PROG_NAME, argv[0]);
+ 		return 1;
+ 	}
+ 
+diff --git a/src/show.c b/src/show.c
+index 13777cf..001ca1d 100644
+--- a/src/show.c
++++ b/src/show.c
+@@ -220,6 +220,24 @@ static void pretty_print(struct wgdevice *device)
+ 		terminal_printf("  " TERMINAL_BOLD "listening port" TERMINAL_RESET ": %u\n", device->listen_port);
+ 	if (device->fwmark)
+ 		terminal_printf("  " TERMINAL_BOLD "fwmark" TERMINAL_RESET ": 0x%x\n", device->fwmark);
++	if (device->junk_packet_count)
++		terminal_printf("  " TERMINAL_BOLD "jc" TERMINAL_RESET ": %u\n", device->junk_packet_count);
++	if (device->junk_packet_min_size)
++		terminal_printf("  " TERMINAL_BOLD "jmin" TERMINAL_RESET ": %u\n", device->junk_packet_min_size);
++	if (device->junk_packet_max_size)
++		terminal_printf("  " TERMINAL_BOLD "jmax" TERMINAL_RESET ": %u\n", device->junk_packet_max_size);
++	if (device->init_packet_junk_size)
++		terminal_printf("  " TERMINAL_BOLD "s1" TERMINAL_RESET ": %u\n", device->init_packet_junk_size);
++	if (device->response_packet_junk_size)
++		terminal_printf("  " TERMINAL_BOLD "s2" TERMINAL_RESET ": %u\n", device->response_packet_junk_size);
++	if (device->init_packet_magic_header)
++		terminal_printf("  " TERMINAL_BOLD "h1" TERMINAL_RESET ": %u\n", device->init_packet_magic_header);
++	if (device->response_packet_magic_header)
++		terminal_printf("  " TERMINAL_BOLD "h2" TERMINAL_RESET ": %u\n", device->response_packet_magic_header);
++	if (device->underload_packet_magic_header)
++		terminal_printf("  " TERMINAL_BOLD "h3" TERMINAL_RESET ": %u\n", device->underload_packet_magic_header);
++	if (device->transport_packet_magic_header)
++		terminal_printf("  " TERMINAL_BOLD "h4" TERMINAL_RESET ": %u\n", device->transport_packet_magic_header);
+ 	if (device->first_peer) {
+ 		sort_peers(device);
+ 		terminal_printf("\n");
+@@ -260,6 +278,15 @@ static void dump_print(struct wgdevice *device, bool with_interface)
+ 	printf("%s\t", maybe_key(device->private_key, device->flags & WGDEVICE_HAS_PRIVATE_KEY));
+ 	printf("%s\t", maybe_key(device->public_key, device->flags & WGDEVICE_HAS_PUBLIC_KEY));
+ 	printf("%u\t", device->listen_port);
++	printf("%u\t", device->junk_packet_count);
++	printf("%u\t", device->junk_packet_min_size);
++	printf("%u\t", device->junk_packet_max_size);
++	printf("%u\t", device->init_packet_junk_size);
++	printf("%u\t", device->response_packet_junk_size);
++	printf("%u\t", device->init_packet_magic_header);
++	printf("%u\t", device->response_packet_magic_header);
++	printf("%u\t", device->underload_packet_magic_header);
++	printf("%u\t", device->transport_packet_magic_header);
+ 	if (device->fwmark)
+ 		printf("0x%x\n", device->fwmark);
+ 	else
+@@ -311,7 +338,43 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
+ 			printf("0x%x\n", device->fwmark);
+ 		else
+ 			printf("off\n");
+-	} else if (!strcmp(param, "endpoints")) {
++	} else if(!strcmp(param, "jc")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->junk_packet_count);
++	 } else if(!strcmp(param, "jmin")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->junk_packet_min_size);
++	 } else if(!strcmp(param, "jmax")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->junk_packet_max_size);
++	 } else if(!strcmp(param, "s1")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->init_packet_junk_size);
++	 } else if(!strcmp(param, "s2")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->response_packet_junk_size);
++	 } else if(!strcmp(param, "h1")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->init_packet_magic_header);
++	 } else if(!strcmp(param, "h2")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->response_packet_magic_header);
++	 } else if(!strcmp(param, "h3")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->underload_packet_magic_header);
++	 } else if(!strcmp(param, "h4")) {
++		if (with_interface)
++			printf("%s\t", device->name);
++		printf("%u\n", device->transport_packet_magic_header);
++	 } else if (!strcmp(param, "endpoints")) {
+ 		for_each_wgpeer(device, peer) {
+ 			if (with_interface)
+ 				printf("%s\t", device->name);
+diff --git a/src/showconf.c b/src/showconf.c
+index 62070dc..424b2be 100644
+--- a/src/showconf.c
++++ b/src/showconf.c
+@@ -46,6 +46,25 @@ int showconf_main(int argc, const char *argv[])
+ 		key_to_base64(base64, device->private_key);
+ 		printf("PrivateKey = %s\n", base64);
+ 	}
++	if (device->flags & WGDEVICE_HAS_JC)
++		printf("Jc = %u\n", device->junk_packet_count);
++	if (device->flags & WGDEVICE_HAS_JMIN)
++		printf("Jmin = %u\n", device->junk_packet_min_size);
++	if (device->flags & WGDEVICE_HAS_JMAX)
++		printf("Jmax = %u\n", device->junk_packet_max_size);
++	if (device->flags & WGDEVICE_HAS_S1)
++		printf("S1 = %u\n", device->init_packet_junk_size);
++	if (device->flags & WGDEVICE_HAS_S2)
++		printf("S2 = %u\n", device->response_packet_junk_size);
++	if (device->flags & WGDEVICE_HAS_H1)
++		printf("H1 = %u\n", device->init_packet_magic_header);
++	if (device->flags & WGDEVICE_HAS_H2)
++		printf("H2 = %u\n", device->response_packet_magic_header);
++	if (device->flags & WGDEVICE_HAS_H3)
++		printf("H3 = %u\n", device->underload_packet_magic_header);
++	if (device->flags & WGDEVICE_HAS_H4)
++		printf("H4 = %u\n", device->transport_packet_magic_header);
++
+ 	printf("\n");
+ 	for_each_wgpeer(device, peer) {
+ 		key_to_base64(base64, peer->public_key);
+@@ -54,6 +73,9 @@ int showconf_main(int argc, const char *argv[])
+ 			key_to_base64(base64, peer->preshared_key);
+ 			printf("PresharedKey = %s\n", base64);
+ 		}
++		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
++			printf("AdvancedSecurity = %s\n", peer->advanced_security ? "on" : "off");
++		}
+ 		if (peer->first_allowedip)
+ 			printf("AllowedIPs = ");
+ 		for_each_wgallowedip(peer, allowedip) {
+diff --git a/src/uapi/linux/linux/wireguard.h b/src/uapi/linux/linux/wireguard.h
+index 6ca266a..b647ce3 100644
+--- a/src/uapi/linux/linux/wireguard.h
++++ b/src/uapi/linux/linux/wireguard.h
+@@ -115,6 +115,9 @@
+  *                                       most recent protocol will be used when
+  *                                       this is unset. Otherwise, must be set
+  *                                       to 1.
++ *            WGPEER_A_ADVANCED_SECURITY: flag indicating that advanced security
++ *                                       techniques provided by AmneziaWG should
++ *                                       be used.
+  *        0: NLA_NESTED
+  *            ...
+  *        ...
+@@ -130,6 +133,25 @@
+  * of a peer, it likely should not be specified in subsequent fragments.
+  *
+  * If an error occurs, NLMSG_ERROR will reply containing an errno.
++ *
++ * WG_CMD_UNKNOWN_PEER
++ * ----------------------
++ *
++ * This command is sent on the multicast group WG_MULTICAST_GROUP_AUTH
++ * when the initiation message received from a peer with an unknown public
++ * key.
++ * The kernel will send a single message containing the
++ * following tree of nested items:
++ *
++ *    WGDEVICE_A_IFINDEX: NLA_U32
++ *    WGDEVICE_A_IFNAME: NLA_NUL_STRING, maxlen IFNAMSIZ - 1
++ *    WGDEVICE_A_PEER: NLA_NESTED
++ *        WGPEER_A_PUBLIC_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
++ *        WGPEER_A_ENDPOINT: NLA_MIN_LEN(struct sockaddr), struct sockaddr_in or struct sockaddr_in6
++ *        WGPEER_A_ADVANCED_SECURITY: flag indicating that advanced security
++ *                                    techniques provided by AmneziaWG should
++ *                                    be used.
++ *
+  */
+ 
+ #ifndef _WG_UAPI_WIREGUARD_H
+@@ -140,9 +162,12 @@
+ 
+ #define WG_KEY_LEN 32
+ 
++#define WG_MULTICAST_GROUP_AUTH "auth"
++
+ enum wg_cmd {
+ 	WG_CMD_GET_DEVICE,
+ 	WG_CMD_SET_DEVICE,
++	WG_CMD_UNKNOWN_PEER,
+ 	__WG_CMD_MAX
+ };
+ #define WG_CMD_MAX (__WG_CMD_MAX - 1)
+@@ -161,6 +186,16 @@ enum wgdevice_attribute {
+ 	WGDEVICE_A_LISTEN_PORT,
+ 	WGDEVICE_A_FWMARK,
+ 	WGDEVICE_A_PEERS,
++	WGDEVICE_A_JC,
++	WGDEVICE_A_JMIN,
++	WGDEVICE_A_JMAX,
++	WGDEVICE_A_S1,
++	WGDEVICE_A_S2,
++	WGDEVICE_A_H1,
++	WGDEVICE_A_H2,
++	WGDEVICE_A_H3,
++	WGDEVICE_A_H4,
++	WGDEVICE_A_PEER,
+ 	__WGDEVICE_A_LAST
+ };
+ #define WGDEVICE_A_MAX (__WGDEVICE_A_LAST - 1)
+@@ -169,6 +204,7 @@ enum wgpeer_flag {
+ 	WGPEER_F_REMOVE_ME = 1U << 0,
+ 	WGPEER_F_REPLACE_ALLOWEDIPS = 1U << 1,
+ 	WGPEER_F_UPDATE_ONLY = 1U << 2,
++	WGPEER_F_HAS_ADVANCED_SECURITY = 1U << 3,
+ 	__WGPEER_F_ALL = WGPEER_F_REMOVE_ME | WGPEER_F_REPLACE_ALLOWEDIPS |
+ 			 WGPEER_F_UPDATE_ONLY
+ };
+@@ -184,6 +220,7 @@ enum wgpeer_attribute {
+ 	WGPEER_A_TX_BYTES,
+ 	WGPEER_A_ALLOWEDIPS,
+ 	WGPEER_A_PROTOCOL_VERSION,
++	WGPEER_A_ADVANCED_SECURITY,
+ 	__WGPEER_A_LAST
+ };
+ #define WGPEER_A_MAX (__WGPEER_A_LAST - 1)
+diff --git a/src/uapi/openbsd/net/if_wg.h b/src/uapi/openbsd/net/if_wg.h
+index bd33a88..5339dd3 100644
+--- a/src/uapi/openbsd/net/if_wg.h
++++ b/src/uapi/openbsd/net/if_wg.h
+@@ -29,19 +29,19 @@
+ #define a_ipv6	a_addr.addr_ipv6
+ 
+ struct wg_aip_io {
+-	sa_family_t	 a_af;
+-	int		 a_cidr;
+-	union wg_aip_addr {
+-		struct in_addr		addr_ipv4;
+-		struct in6_addr		addr_ipv6;
+-	}		 a_addr;
++    sa_family_t	 a_af;
++    int		 a_cidr;
++    union wg_aip_addr {
++        struct in_addr		addr_ipv4;
++        struct in6_addr		addr_ipv6;
++    }		 a_addr;
+ };
+ 
+ #define WG_PEER_HAS_PUBLIC		(1 << 0)
+ #define WG_PEER_HAS_PSK			(1 << 1)
+ #define WG_PEER_HAS_PKA			(1 << 2)
+-#define WG_PEER_HAS_ENDPOINT		(1 << 3)
+-#define WG_PEER_REPLACE_AIPS		(1 << 4)
++#define WG_PEER_HAS_ENDPOINT	(1 << 3)
++#define WG_PEER_REPLACE_AIPS	(1 << 4)
+ #define WG_PEER_REMOVE			(1 << 5)
+ #define WG_PEER_UPDATE			(1 << 6)
+ 

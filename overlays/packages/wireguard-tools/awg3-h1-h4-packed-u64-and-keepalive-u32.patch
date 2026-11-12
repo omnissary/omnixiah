@@ -1,0 +1,483 @@
+From 6ed3ad73047b7c9c21dc214aeed209ff04fd9b3c Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Sat, 24 Oct 2026 05:01:04 +0000
+Subject: [PATCH] follow the kernel netlink changes for H1-H4 and keepalive
+
+H1-H4 now travel as a packed u64 rather than a "start-end" string, and
+persistent keepalive as a u32 carrying a packed u16 range. The CLI and
+config file keep the human spelling: "N" for a single value, "lo-hi" for
+a range, converted at the netlink boundary by awg_range_parse and
+awg_range_format. A bad H range is now rejected before the set rather
+than by the kernel.
+
+PersistentKeepalive accepts the same two spellings; show prints "every
+10 seconds to 30 seconds" for a range, and the dump column carries the
+range verbatim.
+
+AdvancedSecurity is gone, since the kernel no longer has a per-peer flag
+and derives every feature from its configured values. That drops the
+"advanced-security" set argument, the config key, and the showconf line.
+parse_bool had no remaining callers.
+
+netlink.h gains mnl_attr_put_u64 alongside the existing u16 and u32
+helpers.
+---
+ src/config.c     |  68 +++++++------------------
+ src/containers.h |   7 +--
+ src/ipc-linux.h  | 129 +++++++++++++++++++++++++++++++++--------------
+ src/ipc-uapi.h   |   4 --
+ src/netlink.h    |   5 ++
+ src/set.c        |   2 +-
+ src/show.c       |  27 ++++++++--
+ src/showconf.c   |  14 +++--
+ 8 files changed, 148 insertions(+), 108 deletions(-)
+
+diff --git a/src/config.c b/src/config.c
+index 45e0ae7..bd5a104 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -285,9 +285,9 @@ static inline bool parse_endpoint(struct sockaddr *endpoint, const char *value)
+ 	return true;
+ }
+ 
+-static inline bool parse_persistent_keepalive(uint16_t *interval, uint32_t *flags, const char *value)
++static inline bool parse_persistent_keepalive(uint32_t *interval, uint32_t *flags, const char *value)
+ {
+-	unsigned long ret;
++	unsigned long lo, hi;
+ 	char *end;
+ 
+ 	if (!strcasecmp(value, "off")) {
+@@ -299,11 +299,24 @@ static inline bool parse_persistent_keepalive(uint16_t *interval, uint32_t *flag
+ 	if (!char_is_digit(value[0]))
+ 		goto err;
+ 
+-	ret = strtoul(value, &end, 10);
+-	if (*end || ret > 65535)
++	lo = strtoul(value, &end, 10);
++	if (lo > 65535)
++		goto err;
++	if (*end == '-') {
++		const char *rest = end + 1;
++
++		if (!char_is_digit(rest[0]))
++			goto err;
++		hi = strtoul(rest, &end, 10);
++		if (hi > 65535 || hi < lo)
++			goto err;
++	} else {
++		hi = lo;
++	}
++	if (*end)
+ 		goto err;
+ 
+-	*interval = (uint16_t)ret;
++	*interval = (uint32_t)hi << 16 | (uint32_t)lo;
+ 	*flags |= WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL;
+ 	return true;
+ err:
+@@ -480,41 +493,6 @@ static inline bool parse_awg_string(char **device_value, const char *name, const
+ 	return true;
+ }
+ 
+-static inline bool parse_bool(bool *device_value, const char *name, const char *value) {
+-
+-	if (!strlen(value)) {
+-		fprintf(stderr, "Unable to parse empty string\n");
+-		return false;
+-	}
+-
+-	if (!strcasecmp(value, "off")) {
+-		*device_value = false;
+-		return true;
+-	}
+-
+-	if (!strcasecmp(value, "on")) {
+-		*device_value = true;
+-		return true;
+-	}
+-
+-	if (!char_is_digit(value[0]))
+-		goto err;
+-
+-	char *end;
+-	uint32_t ret;
+-	ret = strtoul(value, &end, 10);
+-
+-	if (*end) {
+-		fprintf(stderr, "Unable to parse %s: `%s'\n", name, value);
+-		exit(1);
+-	}
+-	*device_value = ret != 0;
+-	return true;
+-err:
+-	fprintf(stderr, "Boolean value is neither on/off nor 0/1: `%s'\n", value);
+-	return false;
+-}
+-
+ static bool process_line(struct config_ctx *ctx, const char *line)
+ {
+ 	const char *value;
+@@ -637,10 +615,6 @@ static bool process_line(struct config_ctx *ctx, const char *line)
+ 			ret = parse_key(ctx->last_peer->preshared_key, value);
+ 			if (ret)
+ 				ctx->last_peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+-		} else if (key_match("AdvancedSecurity")) {
+-			ret = parse_bool(&ctx->last_peer->advanced_security, "AdvancedSecurity", value);
+-			if (ret)
+-				ctx->last_peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
+ 		} else
+ 			goto error;
+ 	} else
+@@ -966,12 +940,6 @@ struct wgdevice *config_read_cmd(const char *argv[], int argc)
+ 			peer->flags |= WGPEER_HAS_PRESHARED_KEY;
+ 			argv += 2;
+ 			argc -= 2;
+-		} else if (!strcmp(argv[0], "advanced-security") && argc >= 2 && peer) {
+-			if (!parse_bool(&peer->advanced_security, "AdvancedSecurity", argv[1]))
+-				goto error;
+-			peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
+-			argv += 2;
+-			argc -= 2;
+ 		} else {
+ 			fprintf(stderr, "Invalid argument: %s\n", argv[0]);
+ 			goto error;
+diff --git a/src/containers.h b/src/containers.h
+index 1b55ac6..bc2ee4d 100644
+--- a/src/containers.h
++++ b/src/containers.h
+@@ -53,8 +53,7 @@ enum {
+ 	WGPEER_REPLACE_ALLOWEDIPS = 1U << 1,
+ 	WGPEER_HAS_PUBLIC_KEY = 1U << 2,
+ 	WGPEER_HAS_PRESHARED_KEY = 1U << 3,
+-	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4,
+-	WGPEER_HAS_ADVANCED_SECURITY = 1U << 5
++	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4
+ };
+ 
+ struct wgpeer {
+@@ -71,9 +70,7 @@ struct wgpeer {
+ 
+ 	struct timespec64 last_handshake_time;
+ 	uint64_t rx_bytes, tx_bytes;
+-	uint16_t persistent_keepalive_interval;
+-
+-	bool advanced_security;
++	uint32_t persistent_keepalive_interval;
+ 
+ 	struct wgallowedip *first_allowedip, *last_allowedip;
+ 	struct wgpeer *next_peer;
+diff --git a/src/ipc-linux.h b/src/ipc-linux.h
+index 986240d..56b6a95 100644
+--- a/src/ipc-linux.h
++++ b/src/ipc-linux.h
+@@ -139,6 +139,42 @@ cleanup:
+ 	return ret;
+ }
+ 
++static bool awg_range_parse(const char *desc, uint64_t *range)
++{
++	unsigned long lo, hi;
++	char *end;
++
++	lo = strtoul(desc, &end, 10);
++	if (end == desc || lo > UINT32_MAX)
++		return false;
++	if (*end == '-') {
++		const char *rest = end + 1;
++
++		hi = strtoul(rest, &end, 10);
++		if (end == rest || hi > UINT32_MAX)
++			return false;
++	} else {
++		hi = lo;
++	}
++	if (*end != '\0' || lo > hi)
++		return false;
++
++	*range = (uint64_t)hi << 32 | (uint64_t)lo;
++	return true;
++}
++
++static char *awg_range_format(uint64_t range)
++{
++	uint32_t lo = (uint32_t)range, hi = (uint32_t)(range >> 32);
++	char buf[32];
++
++	if (lo == hi)
++		snprintf(buf, sizeof(buf), "%u", lo);
++	else
++		snprintf(buf, sizeof(buf), "%u-%u", lo, hi);
++	return strdup(buf);
++}
++
+ static int kernel_set_device(struct wgdevice *dev)
+ {
+ 	int ret = 0;
+@@ -177,14 +213,42 @@ again:
+ 			mnl_attr_put_u16(nlh, WGDEVICE_A_S3, dev->cookie_reply_packet_junk_size);
+ 		if (dev->flags & WGDEVICE_HAS_S4)
+ 			mnl_attr_put_u16(nlh, WGDEVICE_A_S4, dev->transport_packet_junk_size);
+-		if (dev->flags & WGDEVICE_HAS_H1)
+-			mnl_attr_put_strz(nlh, WGDEVICE_A_H1, dev->init_packet_magic_header);
+-		if (dev->flags & WGDEVICE_HAS_H2)
+-			mnl_attr_put_strz(nlh, WGDEVICE_A_H2, dev->response_packet_magic_header);
+-		if (dev->flags & WGDEVICE_HAS_H3)
+-			mnl_attr_put_strz(nlh, WGDEVICE_A_H3, dev->underload_packet_magic_header);
+-		if (dev->flags & WGDEVICE_HAS_H4)
+-			mnl_attr_put_strz(nlh, WGDEVICE_A_H4, dev->transport_packet_magic_header);
++		if (dev->flags & WGDEVICE_HAS_H1) {
++			uint64_t range;
++
++			if (!awg_range_parse(dev->init_packet_magic_header, &range)) {
++				fprintf(stderr, "Invalid H1 range: %s\n", dev->init_packet_magic_header);
++				return -EINVAL;
++			}
++			mnl_attr_put_u64(nlh, WGDEVICE_A_H1, range);
++		}
++		if (dev->flags & WGDEVICE_HAS_H2) {
++			uint64_t range;
++
++			if (!awg_range_parse(dev->response_packet_magic_header, &range)) {
++				fprintf(stderr, "Invalid H2 range: %s\n", dev->response_packet_magic_header);
++				return -EINVAL;
++			}
++			mnl_attr_put_u64(nlh, WGDEVICE_A_H2, range);
++		}
++		if (dev->flags & WGDEVICE_HAS_H3) {
++			uint64_t range;
++
++			if (!awg_range_parse(dev->underload_packet_magic_header, &range)) {
++				fprintf(stderr, "Invalid H3 range: %s\n", dev->underload_packet_magic_header);
++				return -EINVAL;
++			}
++			mnl_attr_put_u64(nlh, WGDEVICE_A_H3, range);
++		}
++		if (dev->flags & WGDEVICE_HAS_H4) {
++			uint64_t range;
++
++			if (!awg_range_parse(dev->transport_packet_magic_header, &range)) {
++				fprintf(stderr, "Invalid H4 range: %s\n", dev->transport_packet_magic_header);
++				return -EINVAL;
++			}
++			mnl_attr_put_u64(nlh, WGDEVICE_A_H4, range);
++		}
+ 		if (dev->flags & WGDEVICE_HAS_I1)
+ 			mnl_attr_put_strz(nlh, WGDEVICE_A_I1, dev->i1);
+ 		if (dev->flags & WGDEVICE_HAS_I2)
+@@ -231,15 +295,10 @@ again:
+ 					goto toobig_peers;
+ 			}
+ 			if (peer->flags & WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL) {
+-				if (!mnl_attr_put_u16_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
++				if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL, peer->persistent_keepalive_interval))
+ 					goto toobig_peers;
+ 			}
+ 		}
+-		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
+-			if (peer->advanced_security)
+-				mnl_attr_put_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_ADVANCED_SECURITY, 0, NULL);
+-			flags |= WGPEER_F_HAS_ADVANCED_SECURITY;
+-		}
+ 		if (flags) {
+ 			if (!mnl_attr_put_u32_check(nlh, SOCKET_BUFFER_SIZE, WGPEER_A_FLAGS, flags))
+ 				goto toobig_peers;
+@@ -395,8 +454,8 @@ static int parse_peer(const struct nlattr *attr, void *data)
+ 		break;
+ 	}
+ 	case WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U16))
+-			peer->persistent_keepalive_interval = mnl_attr_get_u16(attr);
++		if (!mnl_attr_validate(attr, MNL_TYPE_U32))
++			peer->persistent_keepalive_interval = mnl_attr_get_u32(attr);
+ 		break;
+ 	case WGPEER_A_LAST_HANDSHAKE_TIME:
+ 		if (mnl_attr_get_payload_len(attr) == sizeof(peer->last_handshake_time))
+@@ -410,25 +469,6 @@ static int parse_peer(const struct nlattr *attr, void *data)
+ 		if (!mnl_attr_validate(attr, MNL_TYPE_U64))
+ 			peer->tx_bytes = mnl_attr_get_u64(attr);
+ 		break;
+-	case WGPEER_A_FLAGS:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_U32)) {
+-			uint32_t flags = mnl_attr_get_u32(attr);
+-
+-			if (flags & WGPEER_F_HAS_ADVANCED_SECURITY && !(peer->flags & WGPEER_HAS_ADVANCED_SECURITY)) {
+-				peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
+-				peer->advanced_security = false;
+-			}
+-		}
+-		break;
+-	case WGPEER_A_ADVANCED_SECURITY:
+-		if (!mnl_attr_validate(attr, MNL_TYPE_FLAG)) {
+-			peer->advanced_security = true;
+-
+-			if (!(peer->flags & WGPEER_HAS_ADVANCED_SECURITY)) {
+-				peer->flags |= WGPEER_HAS_ADVANCED_SECURITY;
+-			}
+-		}
+-		break;
+ 	case WGPEER_A_ALLOWEDIPS:
+ 		return mnl_attr_parse_nested(attr, parse_allowedips, peer);
+ 	}
+@@ -464,6 +504,17 @@ static int parse_device(const struct nlattr *attr, void *data)
+ {
+ 	struct wgdevice *device = data;
+ 
++#define parse_range_attr(field, flag) do { \
++	if (!mnl_attr_validate(attr, MNL_TYPE_U64)) { \
++		device->field = awg_range_format(mnl_attr_get_u64(attr)); \
++		if (!device->field) { \
++			perror("strdup"); \
++			return MNL_CB_ERROR; \
++		} \
++		device->flags |= flag; \
++	} \
++} while (0)
++
+ #define parse_string_attr(field, flag) do { \
+ 	if (!mnl_attr_validate(attr, MNL_TYPE_NUL_STRING)) { \
+ 		device->field = strdup(mnl_attr_get_str(attr)); \
+@@ -553,16 +604,16 @@ static int parse_device(const struct nlattr *attr, void *data)
+ 		}
+ 		break;
+ 	case WGDEVICE_A_H1:
+-		parse_string_attr(init_packet_magic_header, WGDEVICE_HAS_H1);
++		parse_range_attr(init_packet_magic_header, WGDEVICE_HAS_H1);
+ 		break;
+ 	case WGDEVICE_A_H2:
+-		parse_string_attr(response_packet_magic_header, WGDEVICE_HAS_H2);
++		parse_range_attr(response_packet_magic_header, WGDEVICE_HAS_H2);
+ 		break;
+ 	case WGDEVICE_A_H3:
+-		parse_string_attr(underload_packet_magic_header, WGDEVICE_HAS_H3);
++		parse_range_attr(underload_packet_magic_header, WGDEVICE_HAS_H3);
+ 		break;
+ 	case WGDEVICE_A_H4:
+-		parse_string_attr(transport_packet_magic_header, WGDEVICE_HAS_H4);
++		parse_range_attr(transport_packet_magic_header, WGDEVICE_HAS_H4);
+ 		break;
+ 	case WGDEVICE_A_I1:
+ 		parse_string_attr(i1, WGDEVICE_HAS_I1);
+diff --git a/src/ipc-uapi.h b/src/ipc-uapi.h
+index 7f21639..211748d 100644
+--- a/src/ipc-uapi.h
++++ b/src/ipc-uapi.h
+@@ -87,10 +87,6 @@ static int userspace_set_device(struct wgdevice *dev)
+ 	for_each_wgpeer(dev, peer) {
+ 		key_to_hex(hex, peer->public_key);
+ 		fprintf(f, "public_key=%s\n", hex);
+-		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
+-			ret = -EINVAL;
+-			goto out;
+-		}
+ 		if (peer->flags & WGPEER_REMOVE_ME) {
+ 			fprintf(f, "remove=true\n");
+ 			continue;
+diff --git a/src/netlink.h b/src/netlink.h
+index f9729ee..51b0d16 100644
+--- a/src/netlink.h
++++ b/src/netlink.h
+@@ -328,6 +328,11 @@ static void mnl_attr_put_u32(struct nlmsghdr *nlh, uint16_t type, uint32_t data)
+ 	mnl_attr_put(nlh, type, sizeof(uint32_t), &data);
+ }
+ 
++static void mnl_attr_put_u64(struct nlmsghdr *nlh, uint16_t type, uint64_t data)
++{
++	mnl_attr_put(nlh, type, sizeof(uint64_t), &data);
++}
++
+ static void mnl_attr_put_strz(struct nlmsghdr *nlh, uint16_t type, const char *data)
+ {
+ 	mnl_attr_put(nlh, type, strlen(data)+1, data);
+diff --git a/src/set.c b/src/set.c
+index 946f3f4..d4e217d 100644
+--- a/src/set.c
++++ b/src/set.c
+@@ -18,7 +18,7 @@ int set_main(int argc, const char *argv[])
+ 	int ret = 1;
+ 
+ 	if (argc < 3) {
+-		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [jc <junk_count>] [jmin <min_value>] [jmax <max_value>] [s1 <init_junk>] [s2 <resp_junk>] [s3 <cookie_junk>] [s4 <trans_junk>] [h1 <init_header>] [h2 <resp_header>] [h3 <cookie_header>] [h4 <transp_header>] [i1 \"<tagged_junk>\"] [i2 \"<tagged_junk>\"] [i3 \"<tagged_junk>\"] [i4 \"<tagged_junk>\"] [i5 \"<tagged_junk>\"] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>] [advanced-security <on|off>]...] ]...\n", PROG_NAME, argv[0]);
++		fprintf(stderr, "Usage: %s %s <interface> [listen-port <port>] [fwmark <mark>] [private-key <file path>] [jc <junk_count>] [jmin <min_value>] [jmax <max_value>] [s1 <init_junk>] [s2 <resp_junk>] [s3 <cookie_junk>] [s4 <trans_junk>] [h1 <init_header>] [h2 <resp_header>] [h3 <cookie_header>] [h4 <transp_header>] [i1 \"<tagged_junk>\"] [i2 \"<tagged_junk>\"] [i3 \"<tagged_junk>\"] [i4 \"<tagged_junk>\"] [i5 \"<tagged_junk>\"] [peer <base64 public key> [remove] [preshared-key <file path>] [endpoint <ip>:<port>] [persistent-keepalive <interval seconds>] [allowed-ips [+|-]<ip1>/<cidr1>[,[+|-]<ip2>/<cidr2>]...] ]...\n", PROG_NAME, argv[0]);
+ 		return 1;
+ 	}
+ 
+diff --git a/src/show.c b/src/show.c
+index 0b4d7a2..c2bfee4 100644
+--- a/src/show.c
++++ b/src/show.c
+@@ -173,11 +173,30 @@ static char *ago(const struct timespec64 *t)
+ 	return buf;
+ }
+ 
+-static char *every(uint16_t seconds)
++static char *keepalive_spec(uint32_t range)
+ {
+-	static char buf[1024] = "every ";
++	uint16_t lo = (uint16_t)range, hi = (uint16_t)(range >> 16);
++	static char buf[32];
+ 
+-	pretty_time(buf + strlen("every "), sizeof(buf) - strlen("every ") - 1, seconds);
++	if (lo == hi)
++		snprintf(buf, sizeof(buf), "%u", lo);
++	else
++		snprintf(buf, sizeof(buf), "%u-%u", lo, hi);
++	return buf;
++}
++
++static char *every(uint32_t range)
++{
++	uint16_t lo = (uint16_t)range, hi = (uint16_t)(range >> 16);
++	static char buf[1024] = "every ";
++	size_t off = strlen("every ");
++
++	pretty_time(buf + off, sizeof(buf) - off - 1, lo);
++	if (lo != hi) {
++		off = strlen(buf);
++		off += snprintf(buf + off, sizeof(buf) - off - 1, " to ");
++		pretty_time(buf + off, sizeof(buf) - off - 1, hi);
++	}
+ 	return buf;
+ }
+ 
+@@ -338,7 +357,7 @@ static void dump_print(struct wgdevice *device, bool with_interface)
+ 		printf("%llu\t", (unsigned long long)peer->last_handshake_time.tv_sec);
+ 		printf("%" PRIu64 "\t%" PRIu64 "\t", (uint64_t)peer->rx_bytes, (uint64_t)peer->tx_bytes);
+ 		if (peer->persistent_keepalive_interval)
+-			printf("%u\n", peer->persistent_keepalive_interval);
++			printf("%s\n", keepalive_spec(peer->persistent_keepalive_interval));
+ 		else
+ 			printf("off\n");
+ 	}
+diff --git a/src/showconf.c b/src/showconf.c
+index 727ebcb..1c76bbc 100644
+--- a/src/showconf.c
++++ b/src/showconf.c
+@@ -87,9 +87,6 @@ int showconf_main(int argc, const char *argv[])
+ 			key_to_base64(base64, peer->preshared_key);
+ 			printf("PresharedKey = %s\n", base64);
+ 		}
+-		if (peer->flags & WGPEER_HAS_ADVANCED_SECURITY) {
+-			printf("AdvancedSecurity = %s\n", peer->advanced_security ? "on" : "off");
+-		}
+ 		if (peer->first_allowedip)
+ 			printf("AllowedIPs = ");
+ 		for_each_wgallowedip(peer, allowedip) {
+@@ -125,8 +122,15 @@ int showconf_main(int argc, const char *argv[])
+ 			}
+ 		}
+ 
+-		if (peer->persistent_keepalive_interval)
+-			printf("PersistentKeepalive = %u\n", peer->persistent_keepalive_interval);
++		if (peer->persistent_keepalive_interval) {
++			uint16_t lo = (uint16_t)peer->persistent_keepalive_interval;
++			uint16_t hi = (uint16_t)(peer->persistent_keepalive_interval >> 16);
++
++			if (lo == hi)
++				printf("PersistentKeepalive = %u\n", lo);
++			else
++				printf("PersistentKeepalive = %u-%u\n", lo, hi);
++		}
+ 
+ 		if (peer->next_peer)
+ 			printf("\n");

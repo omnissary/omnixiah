@@ -1,0 +1,672 @@
+From d4eac4ad083aa882198041f00ad6e925cc5132cf Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Thu, 23 Apr 2026 21:46:26 +0000
+Subject: [PATCH] wireguard: add configurable CPS packet generation
+
+Add I1-I5 device attributes for configuring CPS packet descriptors
+through generic netlink. Each descriptor is parsed into a packet
+template made from literal bytes and dynamic fields such as packet
+counter, current Unix time, random bytes, random letters, and random
+digits.
+
+Store the parsed descriptor state on the WireGuard device and emit the
+configured CPS packets before sending a handshake initiation. Dynamic
+fields are refreshed for each generated packet, and the per-peer CPS
+packet counter is randomized at the start of each initiation sequence
+and incremented after each CPS packet.
+
+Expose configured descriptors in device dumps and validate descriptor
+syntax as part of advanced security configuration handling.
+---
+ drivers/net/wireguard/Makefile  |   1 +
+ drivers/net/wireguard/device.c  |  19 +-
+ drivers/net/wireguard/device.h  |   2 +
+ drivers/net/wireguard/junk.c    | 341 ++++++++++++++++++++++++++++++++
+ drivers/net/wireguard/junk.h    |  40 ++++
+ drivers/net/wireguard/netlink.c |  60 ++++++
+ drivers/net/wireguard/peer.h    |   1 +
+ drivers/net/wireguard/send.c    |  14 ++
+ include/uapi/linux/wireguard.h  |  15 ++
+ 9 files changed, 492 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/net/wireguard/junk.c
+ create mode 100644 drivers/net/wireguard/junk.h
+
+diff --git a/drivers/net/wireguard/Makefile b/drivers/net/wireguard/Makefile
+index 389346b25bb8..38c1ee69f8dc 100644
+--- a/drivers/net/wireguard/Makefile
++++ b/drivers/net/wireguard/Makefile
+@@ -3,6 +3,7 @@ ccflags-$(CONFIG_WIREGUARD_DEBUG) += -DDEBUG
+ wireguard-y := main.o
+ wireguard-y += noise.o
+ wireguard-y += device.o
++wireguard-y += junk.o
+ wireguard-y += magic_header.o
+ wireguard-y += peer.o
+ wireguard-y += timers.o
+diff --git a/drivers/net/wireguard/device.c b/drivers/net/wireguard/device.c
+index a5e03f0db958..b678d5a6a6bb 100644
+--- a/drivers/net/wireguard/device.c
++++ b/drivers/net/wireguard/device.c
+@@ -253,6 +253,10 @@ static const struct net_device_ops netdev_ops = {
+ static void wg_destruct(struct net_device *dev)
+ {
+ 	struct wg_device *wg = netdev_priv(dev);
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
++		jp_spec_free(&wg->ispecs[i]);
+ 
+ 	rtnl_lock();
+ 	list_del(&wg->device_list);
+@@ -324,12 +328,14 @@ static int wg_newlink(struct net_device *dev,
+ {
+ 	struct net *link_net = rtnl_newlink_link_net(params);
+ 	struct wg_device *wg = netdev_priv(dev);
+-	int ret = -ENOMEM;
++	int ret = -ENOMEM, i;
+ 
+ 	rcu_assign_pointer(wg->creating_net, link_net);
+ 	init_rwsem(&wg->static_identity.lock);
+ 	mutex_init(&wg->socket_update_lock);
+ 	mutex_init(&wg->device_update_lock);
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i)
++		mutex_init(&wg->ispecs[i].lock);
+ 	wg_allowedips_init(&wg->peer_allowedips);
+ 	wg_cookie_checker_init(&wg->cookie_checker, wg);
+ 	INIT_LIST_HEAD(&wg->peer_list);
+@@ -605,6 +611,17 @@ int wg_device_handle_post_config(struct net_device *dev, struct amnezia_config *
+ 			a_sec_on = true;
+ 	}
+ 
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
++		ret = jp_spec_setup(&wg->ispecs[i]);
++		if (ret) {
++			net_dbg_ratelimited("%s: I%d-packet invalid format\n",
++					    dev->name, i + 1);
++				goto out;
++		}
++		if (wg->ispecs[i].pkt_size > 0)
++			a_sec_on = true;
++	}
++
+ 	if (MESSAGE_INITIATION_SIZE + config.init_packet_junk_size ==
+ 	    MESSAGE_RESPONSE_SIZE + config.response_packet_junk_size) {
+ 		net_dbg_ratelimited("%s: new init size:%d; and new response size:%d; should differ\n",
+diff --git a/drivers/net/wireguard/device.h b/drivers/net/wireguard/device.h
+index 06a28cac7f71..4c3e0ecf83a9 100644
+--- a/drivers/net/wireguard/device.h
++++ b/drivers/net/wireguard/device.h
+@@ -10,6 +10,7 @@
+ #include "allowedips.h"
+ #include "peerlookup.h"
+ #include "cookie.h"
++#include "junk.h"
+ #include "magic_header.h"
+ 
+ #include <linux/types.h>
+@@ -67,6 +68,7 @@ struct wg_device {
+ 	struct mutex device_update_lock, socket_update_lock;
+ 	struct list_head device_list, peer_list;
+ 	struct amnezia_config advanced_security_config;
++	struct jp_spec ispecs[5];
+ 	atomic_t handshake_queue_len;
+ 	unsigned int num_peers, device_update_gen;
+ 	u32 fwmark;
+diff --git a/drivers/net/wireguard/junk.c b/drivers/net/wireguard/junk.c
+new file mode 100644
+index 000000000000..28a03f56b738
+--- /dev/null
++++ b/drivers/net/wireguard/junk.c
+@@ -0,0 +1,341 @@
++// SPDX-License-Identifier: GPL-2.0
++
++#include "junk.h"
++
++#include "messages.h"
++#include "peer.h"
++
++#include <linux/kstrtox.h>
++#include <linux/ktime.h>
++#include <linux/list.h>
++#include <linux/random.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++
++static int parse_b_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++	u8 *pkt;
++	int err;
++	int i;
++	int len;
++
++	if (!val || strncmp(val, "0x", 2))
++		return -EINVAL;
++	val += 2;
++
++	len = strlen(val);
++	if (!len || len % 2)
++		return -EINVAL;
++	len /= 2;
++
++	pkt = kmalloc(len, GFP_KERNEL);
++	if (!pkt)
++		return -ENOMEM;
++
++	for (i = len - 1; i >= 0; --i) {
++		err = kstrtou8(val + i * 2, 16, pkt + i);
++		if (err) {
++			err = -EINVAL;
++			goto err_free_pkt;
++		}
++		val[i * 2] = '\0';
++	}
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag) {
++		err = -ENOMEM;
++		goto err_free_pkt;
++	}
++
++	tag->pkt = pkt;
++	tag->pkt_size = len;
++	list_add(&tag->head, head);
++	return 0;
++
++err_free_pkt:
++	kfree(pkt);
++	return err;
++}
++
++static void pkt_counter_modifier(char *buf, int len, struct wg_peer *peer)
++{
++	u32 value = atomic_read(&peer->jp_packet_counter);
++
++	buf[0] = value >> 24;
++	buf[1] = value >> 16;
++	buf[2] = value >> 8;
++	buf[3] = value;
++}
++
++static int parse_c_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++
++	if (val)
++		return -EINVAL;
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag)
++		return -ENOMEM;
++
++	tag->pkt_size = sizeof(u32);
++	tag->func = pkt_counter_modifier;
++	list_add(&tag->head, head);
++	return 0;
++}
++
++static void unix_time_modifier(char *buf, int len, struct wg_peer *peer)
++{
++	u32 value = (u32)ktime_get_real_seconds();
++
++	buf[0] = value >> 24;
++	buf[1] = value >> 16;
++	buf[2] = value >> 8;
++	buf[3] = value;
++}
++
++static int parse_t_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++
++	if (val)
++		return -EINVAL;
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag)
++		return -ENOMEM;
++
++	tag->pkt_size = sizeof(u32);
++	tag->func = unix_time_modifier;
++	list_add(&tag->head, head);
++	return 0;
++}
++
++static void random_byte_modifier(char *buf, int len, struct wg_peer *peer)
++{
++	get_random_bytes(buf, len);
++}
++
++static int parse_r_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++	int len;
++
++	if (!val || kstrtoint(val, 10, &len) < 0)
++		return -EINVAL;
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag)
++		return -ENOMEM;
++
++	tag->pkt_size = len;
++	tag->func = random_byte_modifier;
++	list_add(&tag->head, head);
++	return 0;
++}
++
++#define ALPHABET_LEN 26
++#define LETTER_LEN (ALPHABET_LEN * 2)
++
++static void random_char_modifier(char *buf, int len, struct wg_peer *peer)
++{
++	int i;
++	u32 byte;
++
++	for (i = 0; i < len; ++i) {
++		byte = get_random_u32() % LETTER_LEN;
++		buf[i] = (byte < ALPHABET_LEN) ? 'a' + byte : 'A' + byte - ALPHABET_LEN;
++	}
++}
++
++static int parse_rc_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++	int len;
++
++	if (!val || kstrtoint(val, 10, &len) < 0)
++		return -EINVAL;
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag)
++		return -ENOMEM;
++
++	tag->pkt_size = len;
++	tag->func = random_char_modifier;
++	list_add(&tag->head, head);
++	return 0;
++}
++
++#define DIGIT_LEN 10
++
++static void random_digit_modifier(char *buf, int len, struct wg_peer *peer)
++{
++	int i;
++
++	for (i = 0; i < len; ++i)
++		buf[i] = '0' + get_random_u32() % DIGIT_LEN;
++}
++
++static int parse_rd_tag(char *val, struct list_head *head)
++{
++	struct jp_tag *tag;
++	int len;
++
++	if (!val || kstrtoint(val, 10, &len) < 0)
++		return -EINVAL;
++
++	tag = kzalloc(sizeof(*tag), GFP_KERNEL);
++	if (!tag)
++		return -ENOMEM;
++
++	tag->pkt_size = len;
++	tag->func = random_digit_modifier;
++	list_add(&tag->head, head);
++	return 0;
++}
++
++int jp_parse_tags(char *str, struct list_head *head)
++{
++	char *key;
++	char *val;
++	int err = 0;
++
++	while (true) {
++		strsep(&str, "<");
++		val = strsep(&str, ">");
++		if (!val)
++			break;
++
++		key = strsep(&val, " ");
++
++		if (!strcmp(key, "b"))
++			err = parse_b_tag(val, head);
++		else if (!strcmp(key, "c"))
++			err = parse_c_tag(val, head);
++		else if (!strcmp(key, "t"))
++			err = parse_t_tag(val, head);
++		else if (!strcmp(key, "r"))
++			err = parse_r_tag(val, head);
++		else if (!strcmp(key, "rc"))
++			err = parse_rc_tag(val, head);
++		else if (!strcmp(key, "rd"))
++			err = parse_rd_tag(val, head);
++		else
++			return -EINVAL;
++
++		if (err)
++			return err;
++	}
++
++	return 0;
++}
++
++void jp_tag_free(struct jp_tag *tag)
++{
++	kfree(tag->pkt);
++}
++
++void jp_spec_free(struct jp_spec *spec)
++{
++	kfree(spec->desc);
++	spec->desc = NULL;
++	kfree(spec->pkt);
++	spec->pkt = NULL;
++	kfree(spec->mods);
++	spec->mods = NULL;
++	spec->pkt_size = 0;
++	spec->mods_size = 0;
++}
++
++int jp_spec_setup(struct jp_spec *spec)
++{
++	struct jp_modifier *mod;
++	struct jp_tag *tag, *tmp;
++	char *buf;
++	int err = 0;
++	int mods_size;
++	int pkt_size;
++	LIST_HEAD(head);
++
++	mutex_lock(&spec->lock);
++
++	kfree(spec->pkt);
++	kfree(spec->mods);
++	spec->pkt = NULL;
++	spec->mods = NULL;
++	spec->pkt_size = 0;
++	spec->mods_size = 0;
++
++	if (!spec->desc) {
++		mutex_unlock(&spec->lock);
++		return 0;
++	}
++
++	buf = kstrdup(spec->desc, GFP_KERNEL);
++	if (!buf) {
++		err = -ENOMEM;
++		goto out;
++	}
++
++	err = jp_parse_tags(buf, &head);
++	if (err)
++		goto out;
++
++	pkt_size = 0;
++	mods_size = 0;
++	list_for_each_entry(tag, &head, head) {
++		pkt_size += tag->pkt_size;
++		if (tag->func)
++			++mods_size;
++	}
++
++	if (pkt_size > MESSAGE_MAX_SIZE) {
++		err = -EINVAL;
++		goto out;
++	}
++
++	spec->pkt = kzalloc(pkt_size, GFP_KERNEL);
++	spec->mods = kzalloc(mods_size * sizeof(*spec->mods), GFP_KERNEL);
++	if (!spec->pkt || !spec->mods) {
++		err = -ENOMEM;
++		goto out;
++	}
++
++	list_for_each_entry_reverse(tag, &head, head) {
++		if (tag->pkt)
++			memcpy(spec->pkt + spec->pkt_size, tag->pkt, tag->pkt_size);
++
++		if (tag->func) {
++			mod = spec->mods + spec->mods_size;
++			mod->func = tag->func;
++			mod->buf = spec->pkt + spec->pkt_size;
++			mod->buf_len = tag->pkt_size;
++			spec->mods_size++;
++		}
++
++		spec->pkt_size += tag->pkt_size;
++	}
++
++out:
++	list_for_each_entry_safe(tag, tmp, &head, head) {
++		jp_tag_free(tag);
++		list_del(&tag->head);
++		kfree(tag);
++	}
++	kfree(buf);
++	mutex_unlock(&spec->lock);
++	return err;
++}
++
++void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer)
++{
++	struct jp_modifier *mod;
++	int i;
++
++	for (i = 0; i < spec->mods_size; ++i) {
++		mod = &spec->mods[i];
++		if (mod->func)
++			mod->func(mod->buf, mod->buf_len, peer);
++	}
++}
+diff --git a/drivers/net/wireguard/junk.h b/drivers/net/wireguard/junk.h
+new file mode 100644
+index 000000000000..b769cfea8791
+--- /dev/null
++++ b/drivers/net/wireguard/junk.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _WG_JUNK_H
++#define _WG_JUNK_H
++
++#include <linux/list.h>
++#include <linux/mutex.h>
++
++struct wg_peer;
++
++typedef void (*jp_modifier_func)(char *buf, int len, struct wg_peer *peer);
++
++struct jp_tag {
++	u8 *pkt;
++	jp_modifier_func func;
++	struct list_head head;
++	int pkt_size;
++};
++
++struct jp_modifier {
++	jp_modifier_func func;
++	char *buf;
++	int buf_len;
++};
++
++struct jp_spec {
++	char *desc;
++	u8 *pkt;
++	struct jp_modifier *mods;
++	struct mutex lock;
++	int pkt_size;
++	int mods_size;
++};
++
++void jp_tag_free(struct jp_tag *tag);
++int jp_parse_tags(char *str, struct list_head *head);
++void jp_spec_free(struct jp_spec *spec);
++int jp_spec_setup(struct jp_spec *spec);
++void jp_spec_applymods(struct jp_spec *spec, struct wg_peer *peer);
++
++#endif /* _WG_JUNK_H */
+diff --git a/drivers/net/wireguard/netlink.c b/drivers/net/wireguard/netlink.c
+index 31d6001e1031..c35eaf90ced4 100644
+--- a/drivers/net/wireguard/netlink.c
++++ b/drivers/net/wireguard/netlink.c
+@@ -294,6 +294,16 @@ static int wg_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
+ 			    (mh_genspec(&wg->advanced_security_config.transport_packet_magic_header,
+ 					buf, sizeof(buf)) &&
+ 			     nla_put_string(skb, WGDEVICE_A_H4, buf)) ||
++			    (wg->ispecs[0].desc &&
++			     nla_put_string(skb, WGDEVICE_A_I1, wg->ispecs[0].desc)) ||
++			    (wg->ispecs[1].desc &&
++			     nla_put_string(skb, WGDEVICE_A_I2, wg->ispecs[1].desc)) ||
++			    (wg->ispecs[2].desc &&
++			     nla_put_string(skb, WGDEVICE_A_I3, wg->ispecs[2].desc)) ||
++			    (wg->ispecs[3].desc &&
++			     nla_put_string(skb, WGDEVICE_A_I4, wg->ispecs[3].desc)) ||
++			    (wg->ispecs[4].desc &&
++			     nla_put_string(skb, WGDEVICE_A_I5, wg->ispecs[4].desc)) ||
+ 			    nla_put_s32(skb, WGDEVICE_A_CREATING_NET, creating_nsid))
+ 				goto out;
+ 
+@@ -703,6 +713,56 @@ static int wg_set_device(struct sk_buff *skb, struct genl_info *info)
+ 			goto out;
+ 	}
+ 
++	if (info->attrs[WGDEVICE_A_I1]) {
++		asc->advanced_security = true;
++		kfree(wg->ispecs[0].desc);
++		wg->ispecs[0].desc = nla_strdup(info->attrs[WGDEVICE_A_I1], GFP_KERNEL);
++		if (!wg->ispecs[0].desc) {
++			ret = -ENOMEM;
++			goto out;
++		}
++	}
++
++	if (info->attrs[WGDEVICE_A_I2]) {
++		asc->advanced_security = true;
++		kfree(wg->ispecs[1].desc);
++		wg->ispecs[1].desc = nla_strdup(info->attrs[WGDEVICE_A_I2], GFP_KERNEL);
++		if (!wg->ispecs[1].desc) {
++			ret = -ENOMEM;
++			goto out;
++		}
++	}
++
++	if (info->attrs[WGDEVICE_A_I3]) {
++		asc->advanced_security = true;
++		kfree(wg->ispecs[2].desc);
++		wg->ispecs[2].desc = nla_strdup(info->attrs[WGDEVICE_A_I3], GFP_KERNEL);
++		if (!wg->ispecs[2].desc) {
++			ret = -ENOMEM;
++			goto out;
++		}
++	}
++
++	if (info->attrs[WGDEVICE_A_I4]) {
++		asc->advanced_security = true;
++		kfree(wg->ispecs[3].desc);
++		wg->ispecs[3].desc = nla_strdup(info->attrs[WGDEVICE_A_I4], GFP_KERNEL);
++		if (!wg->ispecs[3].desc) {
++			ret = -ENOMEM;
++			goto out;
++		}
++	}
++
++	if (info->attrs[WGDEVICE_A_I5]) {
++		asc->advanced_security = true;
++		kfree(wg->ispecs[4].desc);
++		wg->ispecs[4].desc = nla_strdup(info->attrs[WGDEVICE_A_I5], GFP_KERNEL);
++		if (!wg->ispecs[4].desc) {
++			ret = -ENOMEM;
++			goto out;
++		}
++	}
++
+ 	if (flags & WGDEVICE_F_REPLACE_PEERS)
+ 		wg_peer_remove_all(wg);
+ 
+diff --git a/drivers/net/wireguard/peer.h b/drivers/net/wireguard/peer.h
+index 0d983610cd9f..60c7ab7b9ab1 100644
+--- a/drivers/net/wireguard/peer.h
++++ b/drivers/net/wireguard/peer.h
+@@ -64,6 +64,7 @@ struct wg_peer {
+ 	struct list_head allowedips_list;
+ 	struct napi_struct napi;
+ 	u64 internal_id;
++	atomic_t jp_packet_counter;
+ 	bool advanced_security;
+ };
+ 
+diff --git a/drivers/net/wireguard/send.c b/drivers/net/wireguard/send.c
+index eeb093960604..c1dda1eaf209 100644
+--- a/drivers/net/wireguard/send.c
++++ b/drivers/net/wireguard/send.c
+@@ -29,9 +29,11 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+ {
+ 	struct message_handshake_initiation packet;
+ 	struct wg_device *wg = peer->device;
++	struct jp_spec *spec;
+ 	void *buffer;
+ 	u8 ds;
+ 	u16 junk_packet_count, junk_packet_size;
++	int i;
+ 
+ 	u32 init_packet_magic_header = peer->advanced_security ?
+ 		mh_genheader(&wg->advanced_security_config.init_packet_magic_header) :
+@@ -46,6 +48,18 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+ 			    peer->device->dev->name, peer->internal_id,
+ 			    &peer->endpoint.addr);
+ 
++	atomic_set(&peer->jp_packet_counter, get_random_u32());
++	for (i = 0; i < ARRAY_SIZE(wg->ispecs); ++i) {
++		spec = &wg->ispecs[i];
++		if (spec->pkt_size > 0) {
++			mutex_lock(&spec->lock);
++			jp_spec_applymods(spec, peer);
++			wg_socket_send_buffer_to_peer(peer, spec->pkt, spec->pkt_size, 0);
++			atomic_inc(&peer->jp_packet_counter);
++			mutex_unlock(&spec->lock);
++		}
++	}
++
+ 	if (wg->advanced_security_config.advanced_security && peer->advanced_security) {
+ 		junk_packet_count = wg->advanced_security_config.junk_packet_count;
+ 		buffer = kzalloc(wg->advanced_security_config.junk_packet_max_size, GFP_KERNEL);
+diff --git a/include/uapi/linux/wireguard.h b/include/uapi/linux/wireguard.h
+index d91d0f38ecaf..beeb6845a277 100644
+--- a/include/uapi/linux/wireguard.h
++++ b/include/uapi/linux/wireguard.h
+@@ -64,6 +64,11 @@
+  *    WGDEVICE_A_H4: NLA_NUL_STRING
+  *    WGDEVICE_A_S3: NLA_U16
+  *    WGDEVICE_A_S4: NLA_U16
++ *    WGDEVICE_A_I1: NLA_NUL_STRING
++ *    WGDEVICE_A_I2: NLA_NUL_STRING
++ *    WGDEVICE_A_I3: NLA_NUL_STRING
++ *    WGDEVICE_A_I4: NLA_NUL_STRING
++ *    WGDEVICE_A_I5: NLA_NUL_STRING
+  *    WGDEVICE_A_CREATING_NET: NLA_S32
+  *
+  * It is possible that all of the allowed IPs of a single peer will not
+@@ -145,6 +150,11 @@
+  *    WGDEVICE_A_H4: NLA_NUL_STRING, transport packet magic header range (H4)
+  *    WGDEVICE_A_S3: NLA_U16, cookie packet junk size (S3)
+  *    WGDEVICE_A_S4: NLA_U16, transport packet junk size (S4)
++ *    WGDEVICE_A_I1: NLA_NUL_STRING, CPS packet descriptor (I1)
++ *    WGDEVICE_A_I2: NLA_NUL_STRING, CPS packet descriptor (I2)
++ *    WGDEVICE_A_I3: NLA_NUL_STRING, CPS packet descriptor (I3)
++ *    WGDEVICE_A_I4: NLA_NUL_STRING, CPS packet descriptor (I4)
++ *    WGDEVICE_A_I5: NLA_NUL_STRING, CPS packet descriptor (I5)
+  *
+  * It is possible that the amount of configuration data exceeds that of
+  * the maximum message length accepted by the kernel. In that case, several
+@@ -221,6 +231,11 @@ enum wgdevice_attribute {
+ 	WGDEVICE_A_PEER,
+ 	WGDEVICE_A_S3,
+ 	WGDEVICE_A_S4,
++	WGDEVICE_A_I1,
++	WGDEVICE_A_I2,
++	WGDEVICE_A_I3,
++	WGDEVICE_A_I4,
++	WGDEVICE_A_I5,
+ 	WGDEVICE_A_CREATING_NET,
+ 	__WGDEVICE_A_LAST
+ };

@@ -1,0 +1,208 @@
+From 8d27021ae9d34d66346eef09542f842ec5630ecf Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Sat, 24 Oct 2026 04:56:03 +0000
+Subject: [PATCH] uapi: resync wireguard.h with the kernel tree
+
+The vendored header is now a verbatim copy of
+include/uapi/linux/wireguard.h, so a future resync is a plain copy. Only
+the copyright line differs, kept at 2015-2020 rather than regressing to
+the in-tree 2015-2019.
+
+This brings in the AmneziaWG 3 device attributes, H1-H4 as a packed u64
+range, persistent keepalive as u32, the local attribute range at 0x40,
+and drops WGPEER_A_ADVANCED_SECURITY along with
+WGPEER_F_HAS_ADVANCED_SECURITY. The following commits make ipc-linux
+and the config parser match; this one on its own does not build.
+---
+ src/uapi/linux/linux/wireguard.h | 107 +++++++++++++++++++++++++++----
+ 1 file changed, 94 insertions(+), 13 deletions(-)
+
+diff --git a/src/uapi/linux/linux/wireguard.h b/src/uapi/linux/linux/wireguard.h
+index 04475cc..f8a7012 100644
+--- a/src/uapi/linux/linux/wireguard.h
++++ b/src/uapi/linux/linux/wireguard.h
+@@ -34,10 +34,14 @@
+  *            WGPEER_A_PUBLIC_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
+  *            WGPEER_A_PRESHARED_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
+  *            WGPEER_A_ENDPOINT: NLA_MIN_LEN(struct sockaddr), struct sockaddr_in or struct sockaddr_in6
+- *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U16
++ *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U32
+  *            WGPEER_A_LAST_HANDSHAKE_TIME: NLA_EXACT_LEN, struct __kernel_timespec
+  *            WGPEER_A_RX_BYTES: NLA_U64
+  *            WGPEER_A_TX_BYTES: NLA_U64
++ *            WGPEER_A_RX_INNER_BYTES: NLA_U64
++ *            WGPEER_A_TX_INNER_BYTES: NLA_U64
++ *            WGPEER_A_RX_PACKETS: NLA_U64
++ *            WGPEER_A_TX_PACKETS: NLA_U64
+  *            WGPEER_A_ALLOWEDIPS: NLA_NESTED
+  *                0: NLA_NESTED
+  *                    WGALLOWEDIP_A_FAMILY: NLA_U16
+@@ -52,6 +56,32 @@
+  *        0: NLA_NESTED
+  *            ...
+  *        ...
++ *    WGDEVICE_A_JC: NLA_U16
++ *    WGDEVICE_A_JMIN: NLA_U16
++ *    WGDEVICE_A_JMAX: NLA_U16
++ *    WGDEVICE_A_S1: NLA_U16
++ *    WGDEVICE_A_S2: NLA_U16
++ *    WGDEVICE_A_H1: NLA_U64
++ *    WGDEVICE_A_H2: NLA_U64
++ *    WGDEVICE_A_H3: NLA_U64
++ *    WGDEVICE_A_H4: NLA_U64
++ *    WGDEVICE_A_S3: NLA_U16
++ *    WGDEVICE_A_S4: NLA_U16
++ *    WGDEVICE_A_I1: NLA_NUL_STRING
++ *    WGDEVICE_A_I2: NLA_NUL_STRING
++ *    WGDEVICE_A_I3: NLA_NUL_STRING
++ *    WGDEVICE_A_I4: NLA_NUL_STRING
++ *    WGDEVICE_A_I5: NLA_NUL_STRING
++ *    WGDEVICE_A_HEADER_PROTECTION_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
++ *    WGDEVICE_A_CONTENT_PADDING_ADDITION: NLA_U32
++ *    WGDEVICE_A_REKEY_AFTER_TIME: NLA_U32
++ *    WGDEVICE_A_REKEY_TIMEOUT: NLA_U32
++ *    WGDEVICE_A_REJECT_AFTER_TIME: NLA_U32
++ *    WGDEVICE_A_KEEPALIVE_TIMEOUT: NLA_U32
++ *    WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS: NLA_U32
++ *    WGDEVICE_A_RANDOM_TRAILERS: NLA_U8
++ *    WGDEVICE_A_DISABLE_COOKIES: NLA_U8
++ *    WGDEVICE_A_CREATING_NET: NLA_S32
+  *
+  * It is possible that all of the allowed IPs of a single peer will not
+  * fit within a single netlink message. In that case, the same peer will
+@@ -95,7 +125,7 @@
+  *                            peer should only be set if it already exists.
+  *            WGPEER_A_PRESHARED_KEY: len WG_KEY_LEN, all zeros to remove
+  *            WGPEER_A_ENDPOINT: struct sockaddr_in or struct sockaddr_in6
+- *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U16, 0 to disable
++ *            WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: NLA_U32, 0 to disable
+  *            WGPEER_A_ALLOWEDIPS: NLA_NESTED
+  *                0: NLA_NESTED
+  *                    WGALLOWEDIP_A_FAMILY: NLA_U16
+@@ -115,12 +145,50 @@
+  *                                       most recent protocol will be used when
+  *                                       this is unset. Otherwise, must be set
+  *                                       to 1.
+- *            WGPEER_A_ADVANCED_SECURITY: flag indicating that advanced security
+- *                                       techniques provided by AmneziaWG should
+- *                                       be used.
+  *        0: NLA_NESTED
+  *            ...
+  *        ...
++ *    WGDEVICE_A_JC: NLA_U16, junk packet count (Jc)
++ *    WGDEVICE_A_JMIN: NLA_U16, junk packet minimum size (Jmin)
++ *    WGDEVICE_A_JMAX: NLA_U16, junk packet maximum size (Jmax)
++ *    WGDEVICE_A_S1: NLA_U16, init packet junk size (S1)
++ *    WGDEVICE_A_S2: NLA_U16, response packet junk size (S2)
++ *    WGDEVICE_A_H1: NLA_U64, init packet magic header range (H1),
++ *                   low bound in the lower 32 bits, high bound in the upper
++ *    WGDEVICE_A_H2: NLA_U64, response packet magic header range (H2),
++ *                   low bound in the lower 32 bits, high bound in the upper
++ *    WGDEVICE_A_H3: NLA_U64, cookie packet magic header range (H3),
++ *                   low bound in the lower 32 bits, high bound in the upper
++ *    WGDEVICE_A_H4: NLA_U64, transport packet magic header range (H4),
++ *                   low bound in the lower 32 bits, high bound in the upper
++ *    WGDEVICE_A_S3: NLA_U16, cookie packet junk size (S3)
++ *    WGDEVICE_A_S4: NLA_U16, transport packet junk size (S4)
++ *    WGDEVICE_A_I1: NLA_NUL_STRING, CPS packet descriptor (I1)
++ *    WGDEVICE_A_I2: NLA_NUL_STRING, CPS packet descriptor (I2)
++ *    WGDEVICE_A_I3: NLA_NUL_STRING, CPS packet descriptor (I3)
++ *    WGDEVICE_A_I4: NLA_NUL_STRING, CPS packet descriptor (I4)
++ *    WGDEVICE_A_I5: NLA_NUL_STRING, CPS packet descriptor (I5)
++ *    WGDEVICE_A_HEADER_PROTECTION_KEY: NLA_EXACT_LEN, len WG_KEY_LEN, ChaCha20
++ *                                      key encrypting the message header; needs
++ *                                      every S1-S4 at least 12 bytes to carry
++ *                                      the per-packet nonce
++ *    WGDEVICE_A_CONTENT_PADDING_ADDITION: NLA_U32, u16 range of extra bytes to
++ *                                         pad transport content with, low
++ *                                         bound in the lower 16 bits, high
++ *                                         bound in the upper
++ *    WGDEVICE_A_REKEY_AFTER_TIME: NLA_U32, u16 range overriding REKEY_AFTER_TIME
++ *    WGDEVICE_A_REKEY_TIMEOUT: NLA_U32, u16 range overriding REKEY_TIMEOUT
++ *    WGDEVICE_A_REJECT_AFTER_TIME: NLA_U32, u16 range overriding
++ *                                  REJECT_AFTER_TIME
++ *    WGDEVICE_A_KEEPALIVE_TIMEOUT: NLA_U32, u16 range overriding
++ *                                  KEEPALIVE_TIMEOUT
++ *    WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS: NLA_U32, u16 range overriding
++ *                                       MAX_TIMER_HANDSHAKES
++ *    WGDEVICE_A_RANDOM_TRAILERS: NLA_U8, non-zero to append a random number of
++ *                                bytes to each packet, sized to the largest
++ *                                packet seen on the peer's path
++ *    WGDEVICE_A_DISABLE_COOKIES: NLA_U8, non-zero to never enter the under load
++ *                                state, so no cookie reply is ever sent
+  *
+  * It is possible that the amount of configuration data exceeds that of
+  * the maximum message length accepted by the kernel. In that case, several
+@@ -134,6 +202,11 @@
+  *
+  * If an error occurs, NLMSG_ERROR will reply containing an errno.
+  *
++ * Attributes from 0x40 upwards are reserved for extensions local to this tree,
++ * leaving everything below it to AmneziaWG upstream. The slots in between are
++ * unassigned and generic netlink rejects them as unsupported attributes, so an
++ * upstream addition can be adopted without renumbering anything local.
++ *
+  * WG_CMD_UNKNOWN_PEER
+  * ----------------------
+  *
+@@ -148,10 +221,6 @@
+  *    WGDEVICE_A_PEER: NLA_NESTED
+  *        WGPEER_A_PUBLIC_KEY: NLA_EXACT_LEN, len WG_KEY_LEN
+  *        WGPEER_A_ENDPOINT: NLA_MIN_LEN(struct sockaddr), struct sockaddr_in or struct sockaddr_in6
+- *        WGPEER_A_ADVANCED_SECURITY: flag indicating that advanced security
+- *                                    techniques provided by AmneziaWG should
+- *                                    be used.
+- *
+  */
+ 
+ #ifndef _WG_UAPI_WIREGUARD_H
+@@ -160,10 +229,10 @@
+ #define WG_GENL_NAME "wireguard"
+ #define WG_GENL_VERSION 1
+ 
+-#define WG_KEY_LEN 32
+-
+ #define WG_MULTICAST_GROUP_AUTH "auth"
+ 
++#define WG_KEY_LEN 32
++
+ enum wg_cmd {
+ 	WG_CMD_GET_DEVICE,
+ 	WG_CMD_SET_DEVICE,
+@@ -203,6 +272,16 @@ enum wgdevice_attribute {
+ 	WGDEVICE_A_I3,
+ 	WGDEVICE_A_I4,
+ 	WGDEVICE_A_I5,
++	WGDEVICE_A_HEADER_PROTECTION_KEY,
++	WGDEVICE_A_CONTENT_PADDING_ADDITION,
++	WGDEVICE_A_REKEY_AFTER_TIME,
++	WGDEVICE_A_REKEY_TIMEOUT,
++	WGDEVICE_A_REJECT_AFTER_TIME,
++	WGDEVICE_A_KEEPALIVE_TIMEOUT,
++	WGDEVICE_A_MAX_HANDSHAKE_ATTEMPTS,
++	WGDEVICE_A_RANDOM_TRAILERS,
++	WGDEVICE_A_DISABLE_COOKIES,
++	WGDEVICE_A_CREATING_NET = 0x40,
+ 	__WGDEVICE_A_LAST
+ };
+ #define WGDEVICE_A_MAX (__WGDEVICE_A_LAST - 1)
+@@ -211,7 +290,6 @@ enum wgpeer_flag {
+ 	WGPEER_F_REMOVE_ME = 1U << 0,
+ 	WGPEER_F_REPLACE_ALLOWEDIPS = 1U << 1,
+ 	WGPEER_F_UPDATE_ONLY = 1U << 2,
+-	WGPEER_F_HAS_ADVANCED_SECURITY = 1U << 3,
+ 	__WGPEER_F_ALL = WGPEER_F_REMOVE_ME | WGPEER_F_REPLACE_ALLOWEDIPS |
+ 			 WGPEER_F_UPDATE_ONLY
+ };
+@@ -227,7 +305,10 @@ enum wgpeer_attribute {
+ 	WGPEER_A_TX_BYTES,
+ 	WGPEER_A_ALLOWEDIPS,
+ 	WGPEER_A_PROTOCOL_VERSION,
+-	WGPEER_A_ADVANCED_SECURITY,
++	WGPEER_A_RX_INNER_BYTES = 0x40,
++	WGPEER_A_TX_INNER_BYTES,
++	WGPEER_A_RX_PACKETS,
++	WGPEER_A_TX_PACKETS,
+ 	__WGPEER_A_LAST
+ };
+ #define WGPEER_A_MAX (__WGPEER_A_LAST - 1)

@@ -1,0 +1,79 @@
+From 29c8ccffdcfd67339541297716eaa11288336810 Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Tue, 2 Dec 2025 21:53:27 +0000
+Subject: [PATCH] add creating_net nsid extension to wireguard netlink device
+ dump
+
+---
+ drivers/net/wireguard/netlink.c | 16 ++++++++++++++--
+ include/uapi/linux/wireguard.h  |  2 ++
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireguard/netlink.c b/drivers/net/wireguard/netlink.c
+index 0ce3c3a79eab..7f737950ceba 100644
+--- a/drivers/net/wireguard/netlink.c
++++ b/drivers/net/wireguard/netlink.c
+@@ -6,6 +6,7 @@
+ #include "netlink.h"
+ #include "device.h"
+ #include "linux/kernel.h"
++#include "net/net_namespace.h"
+ #include "peer.h"
+ #include "socket.h"
+ #include "queueing.h"
+@@ -38,7 +39,8 @@ static const struct nla_policy device_policy[WGDEVICE_A_MAX + 1] = {
+ 	[WGDEVICE_A_H2]			= { .type = NLA_U32 },
+ 	[WGDEVICE_A_H3]			= { .type = NLA_U32 },
+ 	[WGDEVICE_A_H4]			= { .type = NLA_U32 },
+-        [WGDEVICE_A_PEER]               = { .type = NLA_NESTED }
++        [WGDEVICE_A_PEER]               = { .type = NLA_NESTED },
++        [WGDEVICE_A_CREATING_NET]       = { .type = NLA_S32 }
+ };
+ 
+ static const struct nla_policy peer_policy[WGPEER_A_MAX + 1] = {
+@@ -231,6 +233,15 @@ static int wg_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
+ 	int ret = -EMSGSIZE;
+ 	bool done = true;
+ 	void *hdr;
++	int creating_nsid = -1;
++	struct net *creating_net;
++	struct net *current_net = current->nsproxy->net_ns;
++
++	rcu_read_lock();
++	creating_net = rcu_dereference(wg->creating_net);
++	rcu_read_unlock();
++	if (creating_net && creating_net != current_net)
++		creating_nsid = peernet2id(current_net, creating_net);
+ 
+ 	rtnl_lock();
+ 	mutex_lock(&wg->device_update_lock);
+@@ -266,7 +277,8 @@ static int wg_get_device_dump(struct sk_buff *skb, struct netlink_callback *cb)
+ 		    nla_put_u32(skb, WGDEVICE_A_H3,
+ 					    wg->advanced_security_config.cookie_packet_magic_header) ||
+ 		    nla_put_u32(skb, WGDEVICE_A_H4,
+-					    wg->advanced_security_config.transport_packet_magic_header))
++					    wg->advanced_security_config.transport_packet_magic_header) ||
++		    nla_put_s32(skb, WGDEVICE_A_CREATING_NET, creating_nsid))
+ 			goto out;
+ 
+ 		down_read(&wg->static_identity.lock);
+diff --git a/include/uapi/linux/wireguard.h b/include/uapi/linux/wireguard.h
+index 361758765467..555e933daf86 100644
+--- a/include/uapi/linux/wireguard.h
++++ b/include/uapi/linux/wireguard.h
+@@ -62,6 +62,7 @@
+  *    WGDEVICE_A_H2: NLA_U32
+  *    WGDEVICE_A_H3: NLA_U32
+  *    WGDEVICE_A_H4: NLA_U32
++ *    WGDEVICE_A_CREATING_NET: NLA_S32
+  *
+  * It is possible that all of the allowed IPs of a single peer will not
+  * fit within a single netlink message. In that case, the same peer will
+@@ -214,6 +215,7 @@ enum wgdevice_attribute {
+ 	WGDEVICE_A_H3,
+ 	WGDEVICE_A_H4,
+ 	WGDEVICE_A_PEER,
++	WGDEVICE_A_CREATING_NET,
+ 	__WGDEVICE_A_LAST
+ };
+ #define WGDEVICE_A_MAX (__WGDEVICE_A_LAST - 1)
