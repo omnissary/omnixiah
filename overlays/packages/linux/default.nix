@@ -51,6 +51,11 @@ _self: super: {
             # https://git.tatikoma.dev/omnixiah/linux/compare/7727732d33bd4f4200b2893c2ead32eac5742d91...cfdedaaa0b0867366e8045771363a6b727caa9f3.diff
             patch = ./amneziawg-naming-correctness-fixes-and-selftests.diff;
           }
+          {
+            name = "defer single-peer cleanup outside configuration locks";
+            # https://git.tatikoma.dev/omnixiah/linux/commit/81f124d51cb761c49261283e820fe8dad3e90de9.patch
+            patch = ./defer-single-peer-cleanup-outside-configuration-locks.patch;
+          }
         ];
       });
     }

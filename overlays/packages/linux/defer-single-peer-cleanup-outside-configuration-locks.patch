@@ -1,0 +1,255 @@
+From 81f124d51cb761c49261283e820fe8dad3e90de9 Mon Sep 17 00:00:00 2001
+From: Dmitry Moskowski <me@corpix.ru>
+Date: Thu, 12 Nov 2026 13:02:11 +0000
+Subject: [PATCH] wireguard: defer single-peer cleanup outside configuration
+ locks
+
+Single-peer removal flushes the device crypt workqueue twice while holding
+RTNL and the generic netlink lock. Delayed crypt workers therefore stall
+unrelated network configuration and peer additions.
+
+Mark peers dead and update their count synchronously, then retain their
+references for batched cleanup on a per-device ordered workqueue. Use the
+netdevice locking in the NAPI helpers and share queue flushes and an RCU
+grace period across each batch. Drain deferred cleanup before destroying
+the device's other workqueues. Bulk replacement remains synchronous.
+
+Validated with a QEMU fault-injection regression test: configuration
+operations complete while crypt work is delayed, same-key re-addition
+preserves traffic, and replacement and pending device teardown wait for
+cleanup. The pre-fix kernel fails the regression. Lockdep and work/timer
+lifetime checks report no warnings. Production driver build and checkpatch
+also pass. The diagnostic harness is not included in this commit.
+---
+ drivers/net/wireguard/device.c | 15 +++++-
+ drivers/net/wireguard/device.h |  5 ++
+ drivers/net/wireguard/peer.c   | 85 +++++++++++++++++++++++++---------
+ drivers/net/wireguard/peer.h   |  1 +
+ 4 files changed, 82 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/net/wireguard/device.c b/drivers/net/wireguard/device.c
+index 5b06c04ca43e..ad0520999453 100644
+--- a/drivers/net/wireguard/device.c
++++ b/drivers/net/wireguard/device.c
+@@ -248,6 +248,10 @@ static void wg_destruct(struct net_device *dev)
+ 	rtnl_lock();
+ 	list_del(&wg->device_list);
+ 	rtnl_unlock();
++	/* The device is unregistered, so no new removals can be queued.
++	 * Drain deferred cleanup before destroying any queues it flushes.
++	 */
++	destroy_workqueue(wg->peer_remove_wq);
+ 	mutex_lock(&wg->device_update_lock);
+ 	rcu_assign_pointer(wg->creating_net, NULL);
+ 	wg->incoming_port = 0;
+@@ -330,6 +334,9 @@ static int wg_newlink(struct net_device *dev,
+ 	wg_allowedips_init(&wg->peer_allowedips);
+ 	wg_cookie_checker_init(&wg->cookie_checker, wg);
+ 	INIT_LIST_HEAD(&wg->peer_list);
++	INIT_LIST_HEAD(&wg->dead_peers);
++	spin_lock_init(&wg->dead_peers_lock);
++	INIT_WORK(&wg->peer_remove_work, wg_peer_remove_work);
+ 	wg->device_update_gen = 1;
+ 
+ 	obfuscation = kzalloc(sizeof(*obfuscation), GFP_KERNEL);
+@@ -374,10 +381,14 @@ static int wg_newlink(struct net_device *dev,
+ 	if (!wg->packet_crypt_wq)
+ 		goto err_destroy_handshake_send;
+ 
++	wg->peer_remove_wq = alloc_ordered_workqueue("wg-rm-%s", 0, dev->name);
++	if (!wg->peer_remove_wq)
++		goto err_destroy_packet_crypt;
++
+ 	ret = wg_packet_queue_init(&wg->encrypt_queue, wg_packet_encrypt_worker,
+ 				   MAX_QUEUED_PACKETS);
+ 	if (ret < 0)
+-		goto err_destroy_packet_crypt;
++		goto err_destroy_peer_remove;
+ 
+ 	ret = wg_packet_queue_init(&wg->decrypt_queue, wg_packet_decrypt_worker,
+ 				   MAX_QUEUED_PACKETS);
+@@ -416,6 +427,8 @@ err_free_decrypt_queue:
+ 	wg_packet_queue_free(&wg->decrypt_queue, false);
+ err_free_encrypt_queue:
+ 	wg_packet_queue_free(&wg->encrypt_queue, false);
++err_destroy_peer_remove:
++	destroy_workqueue(wg->peer_remove_wq);
+ err_destroy_packet_crypt:
+ 	destroy_workqueue(wg->packet_crypt_wq);
+ err_destroy_handshake_send:
+diff --git a/drivers/net/wireguard/device.h b/drivers/net/wireguard/device.h
+index 7534a4099bc9..3b8ee042033b 100644
+--- a/drivers/net/wireguard/device.h
++++ b/drivers/net/wireguard/device.h
+@@ -18,6 +18,7 @@
+ #include <linux/netdevice.h>
+ #include <linux/workqueue.h>
+ #include <linux/mutex.h>
++#include <linux/spinlock.h>
+ #include <linux/net.h>
+ #include <linux/rcupdate.h>
+ #include <linux/ptr_ring.h>
+@@ -73,6 +74,10 @@ struct wg_device {
+ 	struct net __rcu *creating_net;
+ 	struct noise_static_identity static_identity;
+ 	struct workqueue_struct *packet_crypt_wq, *handshake_receive_wq, *handshake_send_wq;
++	struct workqueue_struct *peer_remove_wq;
++	struct work_struct peer_remove_work;
++	struct list_head dead_peers;
++	spinlock_t dead_peers_lock;
+ 	struct cookie_checker cookie_checker;
+ 	struct pubkey_hashtable *peer_hashtable;
+ 	struct index_hashtable *index_hashtable;
+diff --git a/drivers/net/wireguard/peer.c b/drivers/net/wireguard/peer.c
+index d33e9e100854..5c743cf9a79b 100644
+--- a/drivers/net/wireguard/peer.c
++++ b/drivers/net/wireguard/peer.c
+@@ -92,19 +92,29 @@ static void peer_make_dead(struct wg_peer *peer)
+ 	/* The caller must now synchronize_net() for this to take effect. */
+ }
+ 
+-static void peer_remove_after_dead(struct wg_peer *peer)
++/* Each peer on dead must retain its reference from wg_peer_create() and have
++ * passed through peer_make_dead() followed by synchronize_net().
++ */
++static void peers_remove_after_dead(struct wg_device *wg, struct list_head *dead)
+ {
+-	WARN_ON(!peer->is_dead);
++	struct wg_peer *peer, *temp;
+ 
+-	/* No more keypairs can be created for this peer, since is_dead protects
+-	 * add_new_keypair, so we can now destroy existing ones.
+-	 */
+-	wg_noise_keypairs_clear(&peer->keypairs);
++	if (list_empty(dead))
++		return;
+ 
+-	/* Destroy all ongoing timers that were in-flight at the beginning of
+-	 * this function.
+-	 */
+-	wg_timers_stop(peer);
++	list_for_each_entry(peer, dead, peer_list) {
++		WARN_ON(!peer->is_dead);
++
++		/* No more keypairs can be created for this peer, since is_dead
++		 * protects add_new_keypair, so we can now destroy existing ones.
++		 */
++		wg_noise_keypairs_clear(&peer->keypairs);
++
++		/* Destroy all ongoing timers that were in-flight at the
++		 * beginning of this function.
++		 */
++		wg_timers_stop(peer);
++	}
+ 
+ 	/* The transition between packet encryption/decryption queues isn't
+ 	 * guarded by is_dead, but each reference's life is strictly bounded by
+@@ -114,20 +124,23 @@ static void peer_remove_after_dead(struct wg_peer *peer)
+ 	 */
+ 
+ 	/* a) For encrypt/decrypt. */
+-	flush_workqueue(peer->device->packet_crypt_wq);
++	flush_workqueue(wg->packet_crypt_wq);
+ 	/* b.1) For send (but not receive, since that's napi). */
+-	flush_workqueue(peer->device->packet_crypt_wq);
++	flush_workqueue(wg->packet_crypt_wq);
+ 	/* b.2.1) For receive (but not send, since that's wq). */
+-	napi_disable(&peer->napi);
+-	/* b.2.1) It's now safe to remove the napi struct, which must be done
+-	 * here from process context.
++	list_for_each_entry(peer, dead, peer_list)
++		napi_disable(&peer->napi);
++	/* __netif_napi_del() serializes changes to dev->napi_list with the
++	 * netdev lock. Share one RCU grace period across the whole batch.
+ 	 */
+-	netif_napi_del(&peer->napi);
++	list_for_each_entry(peer, dead, peer_list)
++		__netif_napi_del(&peer->napi);
++	synchronize_net();
+ 
+ 	/* Ensure any workstructs we own (like transmit_handshake_work or
+ 	 * clear_peer_work) no longer are in use.
+ 	 */
+-	flush_workqueue(peer->device->handshake_send_wq);
++	flush_workqueue(wg->handshake_send_wq);
+ 
+ 	/* After the above flushes, a peer might still be active in a few
+ 	 * different contexts: 1) from xmit(), before hitting is_dead and
+@@ -146,8 +159,22 @@ static void peer_remove_after_dead(struct wg_peer *peer)
+ 	 * with a refcount of zero, so no new reference is taken.
+ 	 */
+ 
+-	--peer->device->num_peers;
+-	wg_peer_put(peer);
++	list_for_each_entry_safe(peer, temp, dead, peer_list) {
++		list_del_init(&peer->peer_list);
++		wg_peer_put(peer);
++	}
++}
++
++void wg_peer_remove_work(struct work_struct *work)
++{
++	struct wg_device *wg = container_of(work, struct wg_device,
++					    peer_remove_work);
++	LIST_HEAD(dead);
++
++	spin_lock(&wg->dead_peers_lock);
++	list_splice_init(&wg->dead_peers, &dead);
++	spin_unlock(&wg->dead_peers_lock);
++	peers_remove_after_dead(wg, &dead);
+ }
+ 
+ /* We have a separate "remove" function make sure that all active places where
+@@ -156,13 +183,25 @@ static void peer_remove_after_dead(struct wg_peer *peer)
+  */
+ void wg_peer_remove(struct wg_peer *peer)
+ {
++	struct wg_device *wg;
++
+ 	if (unlikely(!peer))
+ 		return;
+-	lockdep_assert_held(&peer->device->device_update_lock);
++	wg = peer->device;
++	lockdep_assert_held(&wg->device_update_lock);
+ 
+ 	peer_make_dead(peer);
+ 	synchronize_net();
+-	peer_remove_after_dead(peer);
++	--wg->num_peers;
++
++	/* Defer queue flushes so delayed workers don't stall configuration
++	 * while our caller holds RTNL. The cleanup worker takes ownership of
++	 * the peer's creation reference and drops it after teardown.
++	 */
++	spin_lock(&wg->dead_peers_lock);
++	list_add_tail(&peer->peer_list, &wg->dead_peers);
++	spin_unlock(&wg->dead_peers_lock);
++	queue_work(wg->peer_remove_wq, &wg->peer_remove_work);
+ }
+ 
+ void wg_peer_remove_all(struct wg_device *wg)
+@@ -178,10 +217,10 @@ void wg_peer_remove_all(struct wg_device *wg)
+ 	list_for_each_entry_safe(peer, temp, &wg->peer_list, peer_list) {
+ 		peer_make_dead(peer);
+ 		list_add_tail(&peer->peer_list, &dead_peers);
++		--wg->num_peers;
+ 	}
+ 	synchronize_net();
+-	list_for_each_entry_safe(peer, temp, &dead_peers, peer_list)
+-		peer_remove_after_dead(peer);
++	peers_remove_after_dead(wg, &dead_peers);
+ }
+ 
+ static void rcu_release(struct rcu_head *rcu)
+diff --git a/drivers/net/wireguard/peer.h b/drivers/net/wireguard/peer.h
+index 9f1909bf017d..6888c478c430 100644
+--- a/drivers/net/wireguard/peer.h
++++ b/drivers/net/wireguard/peer.h
+@@ -84,6 +84,7 @@ static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)
+ void wg_peer_put(struct wg_peer *peer);
+ void wg_peer_remove(struct wg_peer *peer);
+ void wg_peer_remove_all(struct wg_device *wg);
++void wg_peer_remove_work(struct work_struct *work);
+ 
+ int wg_peer_init(void);
+ void wg_peer_uninit(void);
