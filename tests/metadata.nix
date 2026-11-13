@@ -20,6 +20,9 @@
   firewall = {
     description = "Firewall module NixOS VM test";
   };
+  linux = {
+    description = "Kernel patches across Linux package sets";
+  };
   rockchip = {
     description = "Rockchip board profiles evaluation test";
   };

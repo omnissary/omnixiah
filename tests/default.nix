@@ -43,6 +43,9 @@
   grub = import ./modules/grub.nix {
     inherit pkgs;
   };
+  linux = import ./modules/linux.nix {
+    inherit pkgs;
+  };
   rockchip = import ./modules/rockchip.nix {
     inherit
       inputs
