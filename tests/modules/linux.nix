@@ -5,8 +5,10 @@ let
     all
     attrNames
     filter
+    hasAttr
     length
     map
+    tryEval
     ;
   inherit (pkgs.lib) concatMap concatStringsSep replaceStrings;
   inherit (pkgs.lib.versions) majorMinor;
@@ -18,6 +20,8 @@ let
   versioned = kernelFor (majorMinor default.version);
   custom = (pkgs.linuxPackagesFor pkgs.linuxKernel.kernels.linux_default).kernel;
   board = pkgs.linuxPackages_rockchip.kernel;
+  latest = pkgs.linuxPackages_latest.kernel;
+  latestVersion = majorMinor latest.version;
 
   patchNames = kernel: map (patch: patch.name) kernel.kernelPatches;
   hasPatchesOnce =
@@ -39,6 +43,14 @@ let
 
   errors =
     versionErrors
+    ++ (
+      if hasAttr latestVersion patchExpectations then
+        [ ]
+      else
+        (if (tryEval pkgs.perf.drvPath).success then [ ] else [ "perf cannot evaluate" ])
+        ++ (if (tryEval latest.src.outPath).success then [ ] else [ "kernel source cannot evaluate" ])
+        ++ (if (tryEval latest.drvPath).success then [ "unsupported kernel derivation evaluated" ] else [ ])
+    )
     ++ (
       if default.drvPath == versioned.drvPath then [ ] else [ "default and versioned kernels differ" ]
     )

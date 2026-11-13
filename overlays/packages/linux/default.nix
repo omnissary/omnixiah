@@ -16,15 +16,15 @@ let
           patchSets.${version}
         else
           throw "Omnixiah has no kernel patch set for Linux ${version}";
-      missingPatches = filter (
+      uniqPatches = filter (
         patch: !(any (existing: existing.name == patch.name) kernel.kernelPatches)
       ) patches;
     in
-    if missingPatches == [ ] then
+    if hasAttr version patchSets && uniqPatches == [ ] then
       kernel
     else
       kernel.override (old: {
-        kernelPatches = old.kernelPatches ++ missingPatches;
+        kernelPatches = old.kernelPatches ++ uniqPatches;
       });
 in
 {
