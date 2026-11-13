@@ -37,6 +37,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    nix-topology = {
+      url = "tarball+https://git.tatikoma.dev/omnixiah/nix-topology/archive/omnixiah.tar.gz";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+    };
+
     dns = {
       url = "tarball+https://git.tatikoma.dev/omnixiah/dns/archive/omnixiah.tar.gz";
       inputs.nixpkgs.follows = "nixpkgs";

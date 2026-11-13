@@ -37,6 +37,7 @@ in
       imports = [
         inputs.disko.nixosModules.default
         inputs.home-manager.nixosModules.default
+        inputs.nix-topology.nixosModules.default
         inputs.sops.nixosModules.default
         ./base.nix
       ];

@@ -84,6 +84,9 @@ let
     ++ optionals (!hasAttrByPath [ "home-manager" ] options) [
       "Home Manager module is not imported"
     ]
+    ++ optionals (!hasAttrByPath [ "topology" "self" ] options) [
+      "Nix topology module is not imported"
+    ]
     ++ optionals (!hasAttrByPath [ "sops" ] options) [
       "SOPS module is not imported"
     ]
