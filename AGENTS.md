@@ -88,7 +88,7 @@ Tests under `tests/modules/` should exercise module evaluation or deterministic 
 
 Create one commit per feature. Keep each commit focused on that feature and include its implementation, tests, and documentation together.
 
-Use multiline commit messages: a concise imperative subject, a blank line, and a body explaining what was changed and why. Do not add AI attribution, AI-generated notices, or AI co-author trailers to commit messages.
+Use multiline commit messages: a concise imperative subject prefixed by the affected area in lowercase, a colon, and a space (for example, `topology: integrate nix-topology` or `overlays: apply Omnixiah before consumer overlays`), a blank line, and a body explaining what was changed and why. Use `nix:` for flake input updates. Do not add AI attribution, AI-generated notices, or AI co-author trailers to commit messages.
 
 Stage changes by explicit path (`git add <path>...`, `git rm <path>...`). Never use `git add -A`, `git add .`, or `git commit -a`: the working tree holds untracked local notes that must not be committed. Check `git diff --cached --stat` before every commit.
 
