@@ -11,11 +11,11 @@
         "omnixiah": []
       },
       "locked": {
-        "lastModified": 1794318363,
-        "narHash": "sha256-4puGI474EeFMbGd83YTEfarPlqzNqgzIQBOipIaY9ok=",
-        "rev": "e36f76468d12c81b7a60596fa02f3659aaa1e1f1",
+        "lastModified": 1794573560,
+        "narHash": "sha256-zjl5sappVlsLsImXFW95Kd9Qy3xgC1iVDv1mkbny/7s=",
+        "rev": "bee49e085216909f7f4bf051a59ac3149da54399",
         "type": "tarball",
-        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/e36f76468d12c81b7a60596fa02f3659aaa1e1f1.tar.gz"
+        "url": "https://git.tatikoma.dev/api/v1/repos/omnixiah/deploy/archive/bee49e085216909f7f4bf051a59ac3149da54399.tar.gz"
       },
       "original": {
         "type": "tarball",
