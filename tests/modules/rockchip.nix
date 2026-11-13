@@ -62,7 +62,7 @@ let
       boardPkgs = evaluated.${name}.pkgs;
       uBoot = boardPkgs.${board.uBoot};
       inherit (cfg.boot.kernelPackages) kernel;
-      patches = map (patch: patch.name) kernel.kernelPatches;
+      patchNames = map (patch: patch.name) kernel.kernelPatches;
       postBuild = unsafeDiscardStringContext cfg.sdImage.postBuildCommands;
     in
     map (error: "${name}: ${error}") (
@@ -97,7 +97,7 @@ let
       ++ optionals (kernel.version != boardPkgs.linuxPackages.kernel.version) [
         "Rockchip kernel does not follow the Omnixiah kernel version"
       ]
-      ++ optionals (!elem "amnezia wireguard extension" patches) [
+      ++ optionals (!elem "amnezia wireguard extension" patchNames) [
         "Rockchip kernel is missing the Omnixiah kernel patches"
       ]
       ++ optionals ((kernel.structuredExtraConfig.ARCH_ROCKCHIP or null) == null) [

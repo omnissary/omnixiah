@@ -94,7 +94,7 @@ let
       felBoot = unsafeDiscardStringContext cfg.system.build.felBoot.text;
       uBootPath = unsafeDiscardStringContext uBoot.outPath;
       inherit (cfg.boot.kernelPackages) kernel;
-      patches = map (patch: patch.name) kernel.kernelPatches;
+      patchNames = map (patch: patch.name) kernel.kernelPatches;
       udevRules = unsafeDiscardStringContext cfg.services.udev.extraRules;
       touchCalibrated =
         hasInfix ''DRIVERS=="sun4i-ts"'' udevRules && hasInfix "LIBINPUT_CALIBRATION_MATRIX" udevRules;
@@ -148,7 +148,7 @@ let
       ++ optionals ((kernel.structuredExtraConfig.BT_HCIUART_RTL or null) == null) [
         "kernel lacks Realtek HCI UART support for the RTL8723BS Bluetooth"
       ]
-      ++ optionals (!elem "amnezia wireguard extension" patches) [
+      ++ optionals (!elem "amnezia wireguard extension" patchNames) [
         "Allwinner kernel is missing the Omnixiah kernel patches"
       ]
       ++ optionals (!elem "fw_devlink=permissive" cfg.boot.kernelParams) [
